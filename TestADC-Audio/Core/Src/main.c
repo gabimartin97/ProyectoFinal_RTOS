@@ -89,9 +89,9 @@ static const uint32_t muestras = recordingTime * sampleRate;
 //static const float dt=0.000023429;
 //float time =0;
 /****************FILTRO*********************/
-#define FIR_FILTER_LENGHT 64
+#define FIR_FILTER_LENGHT 16
 FIRFilter filtroPB;
-static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = {0.0008334f,0.0007998f,0.0007467f,0.0006500f,0.0004769f,0.0001904f,-0.0002443f,-0.0008526f,-0.0016428f,-0.0025996f,-0.0036785f,-0.0048036f,-0.0058671f,-0.0067336f,-0.0072464f,-0.0072380f,-0.0065424f,-0.0050090f,-0.0025174f,0.0010094f,0.0055931f,0.0111922f,0.0176978f,0.0249341f,0.0326647f,0.0406031f,0.0484274f,0.0557995f,0.0623848f,0.0678732f,0.0719996f,0.0745608f,0.0754290f,0.0745608f,0.0719996f,0.0678732f,0.0623848f,0.0557995f,0.0484274f,0.0406031f,0.0326647f,0.0249341f,0.0176978f,0.0111922f,0.0055931f,0.0010094f,-0.0025174f,-0.0050090f,-0.0065424f,-0.0072380f,-0.0072464f,-0.0067336f,-0.0058671f,-0.0048036f,-0.0036785f,-0.0025996f,-0.0016428f,-0.0008526f,-0.0002443f,0.0001904f,0.0004769f,0.0006500f,0.0007467f,0.0007998f};
+static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = {0.0032788f,0.0055130f,0.0115771f,0.0217499f,0.0351254f,0.0497227f,0.0629244f,0.0721283f,0.0754290f,0.0721283f,0.0629244f,0.0497227f,0.0351254f,0.0217499f,0.0115771f,0.0055130f};
 FIL unfilteredData;
 FIL filteredData;
 float circularBuffer[FIR_FILTER_LENGHT] = { 0 };
@@ -246,6 +246,8 @@ int main(void)
 	}
 
 	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+	FIRFilter_Init(&filtroPB, FIR_IMPULSE_RESPONSE, circularBuffer,
+				FIR_FILTER_LENGHT);
 	HAL_ADC_Start_IT(&hadc1);   //ARRANCA EL ADC POR INTERRPUCION
 
   /* USER CODE END 2 */
@@ -314,6 +316,7 @@ int main(void)
 
 		if (doneADC) {
 			doneADC = false;
+			/*
 			char readBuffer[5];
 			char writeBuffer[6];
 			float number = 0.0f;
@@ -343,13 +346,14 @@ int main(void)
 						{
 
 					number = atof(readBuffer);
-					number = FIRFilter_Update(&filtroPB, number);
-					intNumber = (int)number;
+					FIRFilter_Update(&filtroPB, number);
+					intNumber = (int)filtroPB.out;
 					sprintf(writeBuffer,"%04d,",intNumber );
 					f_puts(writeBuffer, &filteredData);
 
 					//f_printf(&filteredData," %u4.0,",number);
 					CDC_Transmit_FS((uint8_t*) writeBuffer, 6);
+
 
 
 				}
@@ -358,6 +362,7 @@ int main(void)
 
 			f_close(&unfilteredData);
 			f_close(&filteredData);
+			*/
 			f_mount(NULL, "", 1);
 
 			bufclear();
@@ -545,15 +550,18 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 	//Tenemos dos vectores buffer
 
 	if (adc1 && (adcCount1 < adcBuff1Size)) {
+		FIRFilter_Update(&filtroPB, (float)HAL_ADC_GetValue(&hadc1));
 
-		adcBuff1[adcCount1++] = HAL_ADC_GetValue(&hadc1);
+		//adcBuff1[adcCount1++] = HAL_ADC_GetValue(&hadc1);
+		adcBuff1[adcCount1++] =(uint32_t)filtroPB.out;
 		samples_count++;
 
 	}
 
 	if (adc2 && (adcCount2 < adcBuff2Size)) {
-
-		adcBuff2[adcCount2++] = HAL_ADC_GetValue(&hadc1);
+		FIRFilter_Update(&filtroPB, (float)HAL_ADC_GetValue(&hadc1));
+		//adcBuff2[adcCount2++] = HAL_ADC_GetValue(&hadc1);
+		adcBuff2[adcCount2++] =(uint32_t)filtroPB.out;
 		samples_count++;
 
 	}
