@@ -107,6 +107,8 @@ void write_wav_from_csv(char *sourceName, char *destName,
 	HAL_Delay(100);
 	f_open(&wav_file, destName, FA_CREATE_ALWAYS | FA_READ | FA_WRITE);
 	HAL_Delay(100);
+
+	/* --------------------- ESCRIBO TODO EL HEADER DEL FORMATO WAV ---------------- */
 	/* write RIFF header */
 
 	//fwrite("RIFF", 1, 4, wav_file);
@@ -125,7 +127,7 @@ void write_wav_from_csv(char *sourceName, char *destName,
 	write_little_endian(byte_rate, 4, &wav_file);
 	write_little_endian(num_channels * bytes_per_sample, 2, &wav_file); /* block align */
 	write_little_endian(8 * bytes_per_sample, 2, &wav_file); /* bits/sample */
-
+	/* --------------------- ESCRIBO TODO EL HEADER DEL FORMATO WAV ---------------- 	 */
 	/* write data subchunk */
 	//fwrite("data", 1, 4, wav_file);
 	f_write(&wav_file, "data", 4, &bytesWritten);

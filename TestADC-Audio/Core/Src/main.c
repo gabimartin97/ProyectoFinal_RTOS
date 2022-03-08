@@ -347,54 +347,14 @@ int main(void) {
 				}
 				//Borro la ultima ','
 				f_lseek(&filteredData, f_tell(&filteredData) - 1);
-				f_puts("begone", &filteredData);
+				f_putc('\0', &filteredData);
 
 			}
 
 			f_close(&unfilteredData);
 			f_close(&filteredData);
 			HAL_Delay(100);
-			/*
-			{
-				f_open(&unfilteredData, "unf.txt",FA_READ);
-				uint16_t wavBuffer[1000];
-				char readBuffer[4] = { 0 };
-				int intNumber = 0;
-				int i = 0;
-				UINT bytesLeidos = 0;
-				int samplecount = 0;
-				//UINT bytesEscritos = 0;
-				//FRESULT fr;
-				BYTE buffer[1]; // array de 1, es decir, un solo caracter
-				for (;;) { //Bucle que lee de un archivo, aplica el filtro y escribe en el otro
 
-					f_read(&unfilteredData, buffer, sizeof buffer,
-							&bytesLeidos);  //Leo  un char
-					if (bytesLeidos == 0)
-						break; // error or eof
-
-					switch (buffer[0]) {
-					case ',': //Si el char es una coma quiere decir que ya lei el numero completo
-						i = 0;
-						intNumber = atoi(readBuffer);
-						if (intNumber < 0)
-							intNumber = 0;
-						wavBuffer[samplecount] = intNumber;
-						memset(readBuffer, 0, strlen(readBuffer));
-
-						break;
-					default: //Si el char no es una coma voy almacenando los digitos del numero en un array
-						readBuffer[i++] = buffer[0];
-						if (i > strlen(readBuffer))
-							i = 0;
-						break;
-					}
-						if(samplecount >= 1000) break;
-				}
-				write_wav("Audio2.wav", 1000, wavBuffer, sampleRate);
-				f_close(&unfilteredData);
-			}
-*/
 
 			write_wav_from_csv("unf.txt", "audio3.wav", muestras, sampleRate);
 
