@@ -224,7 +224,7 @@ int main(void) {
 
 	/* USER CODE END 2 */
 
-	/* Infinite loop */
+	/*-------------------------- Infinite loop  --------------------------*/
 	/* USER CODE BEGIN WHILE */
 	while (1) {
 		/* Debido a que tantas mustras del ADC no entran en la RAM. Vamos grabando de a bloques del tamaño
@@ -232,36 +232,36 @@ int main(void) {
 		 * 	conteo de cuanto buffer se lleno
 		 */
 
-		if (adcCount1 >= adcBuff1Size) {
+		if (adcCount1 >= adcBuff1Size) { //Si se llenó el buffer 1
 			adcCount1 = 0;
 			buff1 = false;
-			buff2 = true;
+			buff2 = true;				//hago que el ADC comience a almacenar en el buff2
 
-			for (int i = 0; i < adcBuff1Size; i++) { //Guardamos en archivo el bloque de muestras
+			for (int i = 0; i < adcBuff1Size; i++) {
 
-				f_printf(&unfilteredData, "%04u,", adcBuff1[i]);
+				f_printf(&unfilteredData, "%04u,", adcBuff1[i]);  //Guardamos en archivo el buffer 1
 			}
 
 		}
 
-		if (adcCount2 >= adcBuff2Size) {
+		if (adcCount2 >= adcBuff2Size) { //Si se llenó el buffer 2
 			adcCount2 = 0;
-			buff1 = true;
+			buff1 = true;				//hago que el ADC comience a almacenar en el buff1
 			buff2 = false;
 
-			for (int i = 0; i < adcBuff2Size; i++) { //Guardamos en archivo el bloque de muestras
+			for (int i = 0; i < adcBuff2Size; i++) {
 
-				f_printf(&unfilteredData, "%04u,", adcBuff2[i]);
+				f_printf(&unfilteredData, "%04u,", adcBuff2[i]); //Guardamos en archivo el buffer 2
 			}
 
 		}
 
-		if (samples_count >= muestras)	// segundos de grabacion
-				{ //Guardamos en archivo el bloque de muestras restantes
+		if (samples_count >= muestras)	// Si se obvtuvieron todas las muestras deseadas
+				{
 
-			HAL_ADC_Stop_IT(&hadc1);
+			HAL_ADC_Stop_IT(&hadc1); 				//Detenemos el ADC
 
-			if (buff1 && adcCount1 > 0 && adcCount1 < adcBuff1Size) {
+			if (buff1 && adcCount1 > 0 && adcCount1 < adcBuff1Size) { //almacenamos lo que quedó del buff 1
 
 				for (int i = 0; i < (adcCount1 - 1); i++) {
 
@@ -269,7 +269,7 @@ int main(void) {
 				}
 				f_printf(&unfilteredData, "%04u", adcBuff1[adcCount1 - 1]); // Ultima muestra sin coma
 			}
-			if (buff2 && adcCount2 > 0 && adcCount2 < adcBuff2Size) {
+			if (buff2 && adcCount2 > 0 && adcCount2 < adcBuff2Size) {  //almacenamos lo que quedó del buff 2
 
 				for (int i = 0; i < (adcCount2 - 1); i++) {
 
@@ -290,9 +290,9 @@ int main(void) {
 			doneADC = false;
 
 			FIRFilter_Init(&filtroPB, FIR_IMPULSE_RESPONSE, circularBuffer,
-			FIR_FILTER_LENGHT);
+			FIR_FILTER_LENGHT); 		//inicio el filtro
 
-			if (f_open(&filteredData, "filtered.txt",
+			if (f_open(&filteredData, "filtered.txt",		//Creo el archivo para almacenar muestras filtradas
 			FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 				memset(buffer, 0, strlen(buffer));
 				sprintf(buffer, "ERROR abriendo filtered ");
@@ -301,14 +301,14 @@ int main(void) {
 
 			HAL_Delay(100);
 
-			if (f_open(&unfilteredData, "unf.txt", FA_READ) != FR_OK) {
+			if (f_open(&unfilteredData, "unf.txt", FA_READ) != FR_OK) {		//Abro el archivo de las muestras sin filtro
 				memset(buffer, 0, strlen(buffer));
 				sprintf(buffer, "ERROR abriendo unfiltered 2");
 				CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
 			} else {
 
-				char readBuffer[4] = { 0 };
-				char writeBuffer[6] = { 0 };
+				char readBuffer[4] = { 0 };	//buffer para leer 4 char que son los digitos de un dato int
+				char writeBuffer[6] = { 0 }; //buffer para escribir en char un numero int
 				float number = 0.0f;
 				int intNumber = 0;
 				int i = 0;
@@ -317,25 +317,24 @@ int main(void) {
 				//FRESULT fr;
 				BYTE buffer[1]; // array de 1, es decir, un solo caracter
 
-				for (;;) { //Bucle que lee de un archivo, aplica el filtro y escribe en el otro
+				for (;;) { //Bucle que lee de un archivo csv, aplica el filtro y escribe en el otro
 
 					f_read(&unfilteredData, buffer, sizeof buffer,
 							&bytesLeidos);  //Leo  un char
-					if (bytesLeidos == 0)
-						break; /* error or eof */
+					if (bytesLeidos == 0) break; /* error or eof */
 
 					switch (buffer[0]) {
 					case ',': //Si el char es una coma quiere decir que ya lei el numero completo
 						i = 0;
-						number = atof(readBuffer);
-						FIRFilter_Update(&filtroPB, number);
-						intNumber = (int) filtroPB.out;
-						if (intNumber < 0)
+						number = atof(readBuffer); //paso de una cadena de char a un float
+						FIRFilter_Update(&filtroPB, number); // Actualizo el filtro FIR con el float
+						intNumber = (int) filtroPB.out; //El nuevo valor es la salida del filtro FIR
+						if (intNumber < 0)		//Por si el filtro devuelve valores negativos
 							intNumber = 0;
-						sprintf(writeBuffer, "%04d,", intNumber);
+						sprintf(writeBuffer, "%04d,", intNumber); //Escribo una cadena de char a partir de un int
 						f_puts(writeBuffer, &filteredData);
-						memset(readBuffer, 0, strlen(readBuffer));
-						memset(writeBuffer, 0, strlen(writeBuffer));
+						memset(readBuffer, 0, strlen(readBuffer)); 	  //Vacio los buffer
+						memset(writeBuffer, 0, strlen(writeBuffer)); //Vacio los buffer
 						break;
 					default: //Si el char no es una coma voy almacenando los digitos del numero en un array
 						readBuffer[i++] = buffer[0];
@@ -345,7 +344,8 @@ int main(void) {
 					}
 
 				}
-				//Borro la ultima ','
+
+				//Borro la ultima ',' del archivo
 				f_lseek(&filteredData, f_tell(&filteredData) - 1);
 				f_putc('\0', &filteredData);
 
@@ -355,10 +355,10 @@ int main(void) {
 			f_close(&filteredData);
 			HAL_Delay(100);
 
-
+			//Creo  un archivo .wav a partir de un archivo csv con esta funcion
 			write_wav_from_csv("unf.txt", "audio3.wav", muestras, sampleRate);
 
-			f_mount(NULL, "", 1);
+			f_mount(NULL, "", 1); //Desmonto la SD
 
 			memset(buffer, 0, strlen(buffer));
 			sprintf(buffer, "\n DONE");

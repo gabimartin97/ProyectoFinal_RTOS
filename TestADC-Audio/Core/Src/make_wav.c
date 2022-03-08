@@ -13,8 +13,8 @@
 #include "fatfs.h"
 #include "fatfs_sd.h"
 #include "string.h"
-void write_little_endian(uint16_t word, int num_bytes, FIL *wav_file) {
-	uint16_t buf;
+void write_little_endian(int16_t word, int num_bytes, FIL *wav_file) {
+	int16_t buf;
 	UINT bytesWritten = 0;
 	while (num_bytes > 0) {
 		buf = word & 0xff;
@@ -134,6 +134,7 @@ void write_wav_from_csv(char *sourceName, char *destName,
 
 	char readBuffer[4] = { 0 };
 	int intNumber = 0;
+	int normalizedNumber;
 	int i = 0;
 	UINT bytesLeidos = 0;
 	BYTE buffer[1]; // array de 1, es decir, un solo caracter
@@ -147,7 +148,10 @@ void write_wav_from_csv(char *sourceName, char *destName,
 		case ',': //Si el char es una coma quiere decir que ya lei el numero completo
 			i = 0;
 			intNumber = atoi(readBuffer);
-			write_little_endian((uint16_t) (intNumber), bytes_per_sample,
+			//Escalo el valor del adc (0 a 4095) a valores int16_t que van desde -32768 a 32767
+			normalizedNumber = (((65535)/(4095))*intNumber) - 32768;
+
+			write_little_endian((int16_t) (intNumber), bytes_per_sample,
 							&wav_file);
 
 			memset(readBuffer, 0, strlen(readBuffer));
