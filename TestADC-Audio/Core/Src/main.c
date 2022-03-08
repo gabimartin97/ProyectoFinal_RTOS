@@ -211,7 +211,7 @@ int main(void) {
 	HAL_Delay(1000);
 
 	/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
-	if (f_open(&unfilteredData, "unf.txt",
+	if (f_open(&unfilteredData, "unf.csv",
 	FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 		sprintf(buffer, "ERROR abriendo unfiltered 1");
 		CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
@@ -292,7 +292,7 @@ int main(void) {
 			FIRFilter_Init(&filtroPB, FIR_IMPULSE_RESPONSE, circularBuffer,
 			FIR_FILTER_LENGHT); 		//inicio el filtro
 
-			if (f_open(&filteredData, "filtered.txt",		//Creo el archivo para almacenar muestras filtradas
+			if (f_open(&filteredData, "filtered.csv",		//Creo el archivo para almacenar muestras filtradas
 			FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 				memset(buffer, 0, strlen(buffer));
 				sprintf(buffer, "ERROR abriendo filtered ");
@@ -301,7 +301,7 @@ int main(void) {
 
 			HAL_Delay(100);
 
-			if (f_open(&unfilteredData, "unf.txt", FA_READ) != FR_OK) {		//Abro el archivo de las muestras sin filtro
+			if (f_open(&unfilteredData, "unf.csv", FA_READ) != FR_OK) {		//Abro el archivo de las muestras sin filtro
 				memset(buffer, 0, strlen(buffer));
 				sprintf(buffer, "ERROR abriendo unfiltered 2");
 				CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
@@ -356,7 +356,8 @@ int main(void) {
 			HAL_Delay(100);
 
 			//Creo  un archivo .wav a partir de un archivo csv con esta funcion
-			write_wav_from_csv("unf.txt", "audio3.wav", muestras, sampleRate);
+			write_wav_from_csv("unf.csv", "unfilt.wav", muestras, sampleRate);
+			write_wav_from_csv("filtered.csv", "filt.wav", muestras, sampleRate);
 
 			f_mount(NULL, "", 1); //Desmonto la SD
 
