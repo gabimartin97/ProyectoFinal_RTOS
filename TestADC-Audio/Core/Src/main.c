@@ -28,6 +28,7 @@
 #include "fatfs_sd.h"
 #include "stdbool.h"
 #include "FIR.h"
+#include "make_wav.h"
 //#include "math.h"
 /* USER CODE END Includes */
 
@@ -94,21 +95,26 @@ static const uint32_t muestras = recordingTime * sampleRate; //Cantidad de muest
 /****************FILTRO*********************/
 #define FIR_FILTER_LENGHT 64
 FIRFilter filtroPB;
-static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] ={-0.0005017f,-0.0010401f,-0.0015571f,-0.0019069f,-0.0019183f,-0.0014621f,
-		-0.0005568f,0.0005421f,0.0013410f,0.0012421f,-0.0002012f,-0.0029985f,-0.0065400f,-0.0096489f,-0.0109215f,
-		-0.0092850f,-0.0045845f,0.0020577f,0.0083285f,0.0113412f,0.0086597f,-0.0005801f,-0.0148709f,-0.0302278f,
-		-0.0409512f,-0.0411462f,-0.0265899f,0.0036339f,0.0463075f,0.0944202f,0.1386798f,0.1698179f,0.1810296f,
-		0.1698179f,0.1386798f,0.0944202f,0.0463075f,0.0036339f,-0.0265899f,-0.0411462f,-0.0409512f,-0.0302278f,
-		-0.0148709f,-0.0005801f,0.0086597f,0.0113412f,0.0083285f,0.0020577f,-0.0045845f,-0.0092850f,-0.0109215f,
-		-0.0096489f,-0.0065400f,-0.0029985f,-0.0002012f,0.0012421f,0.0013410f,0.0005421f,-0.0005568f,-0.0014621f,
-		-0.0019183f,-0.0019069f,-0.0015571f,-0.0010401f};
-
+static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = { -0.0005017f,
+		-0.0010401f, -0.0015571f, -0.0019069f, -0.0019183f, -0.0014621f,
+		-0.0005568f, 0.0005421f, 0.0013410f, 0.0012421f, -0.0002012f,
+		-0.0029985f, -0.0065400f, -0.0096489f, -0.0109215f, -0.0092850f,
+		-0.0045845f, 0.0020577f, 0.0083285f, 0.0113412f, 0.0086597f,
+		-0.0005801f, -0.0148709f, -0.0302278f, -0.0409512f, -0.0411462f,
+		-0.0265899f, 0.0036339f, 0.0463075f, 0.0944202f, 0.1386798f, 0.1698179f,
+		0.1810296f, 0.1698179f, 0.1386798f, 0.0944202f, 0.0463075f, 0.0036339f,
+		-0.0265899f, -0.0411462f, -0.0409512f, -0.0302278f, -0.0148709f,
+		-0.0005801f, 0.0086597f, 0.0113412f, 0.0083285f, 0.0020577f,
+		-0.0045845f, -0.0092850f, -0.0109215f, -0.0096489f, -0.0065400f,
+		-0.0029985f, -0.0002012f, 0.0012421f, 0.0013410f, 0.0005421f,
+		-0.0005568f, -0.0014621f, -0.0019183f, -0.0019069f, -0.0015571f,
+		-0.0010401f };
 
 FIL unfilteredData;
 FIL filteredData;
 float circularBuffer[FIR_FILTER_LENGHT] = { 0 };
 UINT br2, bw2;  //file read/write count
-/****************FILTRO*********************/
+		/****************FILTRO*********************/
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -189,41 +195,7 @@ int main(void) {
 	memset(buffer, 0, strlen(buffer));
 	/*-----------------Card capacity details-----------*/
 
-	/*-----------------Creo el archivo de texto-----------*/
-
-	if (f_open(&fil, "prueba.txt", FA_OPEN_ALWAYS | FA_READ | FA_WRITE)
-			!= FR_OK) {
-		sprintf(buffer, "ERROR abriendo prueba");
-		CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
-		memset(buffer, 0, strlen(buffer));
-	}
-	/*-----------------Creo el archivo de texto-----------*/
-
-	/*-----------------Escribo en el archivo de texto-----------*/
-
-	f_puts("Esto es una prueba", &fil);
-	f_puts("Testing testing", &fil);
-	f_close(&fil);
-	/*-----------------Escribo en el archivo de texto-----------*/
-
-	/*-----------------Leo el archivo de texto-----------*/
-
-	if (f_open(&fil, "prueba.txt", FA_READ) != FR_OK) {
-		memset(buffer, 0, strlen(buffer));
-		sprintf(buffer, "ERROR abriendo prueba");
-		CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
-	}
-
-	memset(buffer, 0, strlen(buffer));
-
-	f_read(&fil, buffer, f_size(&fil), &br);
-	CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
-	memset(buffer, 0, strlen(buffer));
-
-	f_close(&fil);
 	f_mount(NULL, "", 1);
-
-	/*-----------------Leo el archivo de texto-----------*/
 
 	HAL_Delay(1000);
 
@@ -237,17 +209,17 @@ int main(void) {
 	}
 	memset(buffer, 0, strlen(buffer));
 	HAL_Delay(1000);
-	// Calibrate The ADC On Power-Up For Better Accuracy
+
+	/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
 	if (f_open(&unfilteredData, "unf.txt",
-			FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
+	FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 		sprintf(buffer, "ERROR abriendo unfiltered 1");
 		CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
 		memset(buffer, 0, strlen(buffer));
 	}
+	/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
 
-	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-	//FIRFilter_Init(&filtroPB, FIR_IMPULSE_RESPONSE, circularBuffer,
-	//		FIR_FILTER_LENGHT);
+	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin); //Cuando se apaga el LED comienza la conversion
 	HAL_ADC_Start_IT(&hadc1);   //ARRANCA EL ADC POR INTERRPUCION
 
 	/* USER CODE END 2 */
@@ -335,7 +307,6 @@ int main(void) {
 				CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
 			} else {
 
-
 				char readBuffer[4] = { 0 };
 				char writeBuffer[6] = { 0 };
 				float number = 0.0f;
@@ -348,38 +319,84 @@ int main(void) {
 
 				for (;;) { //Bucle que lee de un archivo, aplica el filtro y escribe en el otro
 
-					f_read(&unfilteredData, buffer, sizeof buffer,	&bytesLeidos);  //Leo  un char
+					f_read(&unfilteredData, buffer, sizeof buffer,
+							&bytesLeidos);  //Leo  un char
 					if (bytesLeidos == 0)
 						break; /* error or eof */
 
-					switch (buffer[0])
-					{
+					switch (buffer[0]) {
 					case ',': //Si el char es una coma quiere decir que ya lei el numero completo
 						i = 0;
 						number = atof(readBuffer);
 						FIRFilter_Update(&filtroPB, number);
 						intNumber = (int) filtroPB.out;
+						if (intNumber < 0)
+							intNumber = 0;
 						sprintf(writeBuffer, "%04d,", intNumber);
 						f_puts(writeBuffer, &filteredData);
 						memset(readBuffer, 0, strlen(readBuffer));
 						memset(writeBuffer, 0, strlen(writeBuffer));
 						break;
-					default:  //Si el char no es una coma voy almacenando los digitos del numero en un array
+					default: //Si el char no es una coma voy almacenando los digitos del numero en un array
 						readBuffer[i++] = buffer[0];
-						if(i>strlen(readBuffer)) i =0;
+						if (i > strlen(readBuffer))
+							i = 0;
 						break;
 					}
 
-
 				}
 				//Borro la ultima ','
-				f_lseek(&filteredData, f_size(&filteredData) - 1);
-				f_puts(0,&filteredData);
+				f_lseek(&filteredData, f_tell(&filteredData) - 1);
+				f_puts("begone", &filteredData);
 
 			}
 
 			f_close(&unfilteredData);
 			f_close(&filteredData);
+			HAL_Delay(100);
+			/*
+			{
+				f_open(&unfilteredData, "unf.txt",FA_READ);
+				uint16_t wavBuffer[1000];
+				char readBuffer[4] = { 0 };
+				int intNumber = 0;
+				int i = 0;
+				UINT bytesLeidos = 0;
+				int samplecount = 0;
+				//UINT bytesEscritos = 0;
+				//FRESULT fr;
+				BYTE buffer[1]; // array de 1, es decir, un solo caracter
+				for (;;) { //Bucle que lee de un archivo, aplica el filtro y escribe en el otro
+
+					f_read(&unfilteredData, buffer, sizeof buffer,
+							&bytesLeidos);  //Leo  un char
+					if (bytesLeidos == 0)
+						break; // error or eof
+
+					switch (buffer[0]) {
+					case ',': //Si el char es una coma quiere decir que ya lei el numero completo
+						i = 0;
+						intNumber = atoi(readBuffer);
+						if (intNumber < 0)
+							intNumber = 0;
+						wavBuffer[samplecount] = intNumber;
+						memset(readBuffer, 0, strlen(readBuffer));
+
+						break;
+					default: //Si el char no es una coma voy almacenando los digitos del numero en un array
+						readBuffer[i++] = buffer[0];
+						if (i > strlen(readBuffer))
+							i = 0;
+						break;
+					}
+						if(samplecount >= 1000) break;
+				}
+				write_wav("Audio2.wav", 1000, wavBuffer, sampleRate);
+				f_close(&unfilteredData);
+			}
+*/
+
+			write_wav_from_csv("unf.txt", "audio3.wav", muestras, sampleRate);
 
 			f_mount(NULL, "", 1);
 
