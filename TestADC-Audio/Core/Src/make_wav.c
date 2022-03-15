@@ -26,61 +26,6 @@ void write_little_endian(int16_t word, int num_bytes, FIL *wav_file) {
 	}
 }
 
-void write_wav(char *filename, uint32_t num_samples, uint16_t *data,
-		uint16_t s_rate) {
-	FIL wav_file;
-	uint16_t sample_rate;
-	uint16_t num_channels;
-	uint16_t bytes_per_sample;
-	uint32_t byte_rate;
-	uint32_t i; /* counter for samples */
-	UINT bytesWritten;
-	num_channels = 1; /* monoaural */
-	bytes_per_sample = 2;
-
-	if (s_rate <= 0)
-		sample_rate = 44100;
-	else
-		sample_rate = s_rate;
-
-	byte_rate = sample_rate * num_channels * bytes_per_sample;
-
-	//wav_file = fopen(filename, "w");
-	f_open(&wav_file, filename, FA_CREATE_ALWAYS | FA_READ | FA_WRITE);
-	//assert(wav_file);   /* make sure it opened */
-
-	/* write RIFF header */
-
-	//fwrite("RIFF", 1, 4, wav_file);
-	f_write(&wav_file, "RIFF", 4, &bytesWritten);
-	write_little_endian(36 + bytes_per_sample * num_samples * num_channels, 4,
-			&wav_file);
-	//fwrite("WAVE", 1, 4, wav_file);
-	f_write(&wav_file, "WAVE", 4, &bytesWritten);
-	/* write fmt  subchunk */
-	//fwrite("fmt ", 1, 4, wav_file);
-	f_write(&wav_file, "fmt ", 4, &bytesWritten);
-	write_little_endian(16, 4, &wav_file); /* SubChunk1Size is 16 */
-	write_little_endian(1, 2, &wav_file); /* PCM is format 1 */
-	write_little_endian(num_channels, 2, &wav_file);
-	write_little_endian(sample_rate, 4, &wav_file);
-	write_little_endian(byte_rate, 4, &wav_file);
-	write_little_endian(num_channels * bytes_per_sample, 2, &wav_file); /* block align */
-	write_little_endian(8 * bytes_per_sample, 2, &wav_file); /* bits/sample */
-
-	/* write data subchunk */
-	//fwrite("data", 1, 4, wav_file);
-	f_write(&wav_file, "data", 4, &bytesWritten);
-
-	write_little_endian(bytes_per_sample * num_samples * num_channels, 4,
-			&wav_file);
-	for (i = 0; i < num_samples; i++) {
-		write_little_endian((uint16_t) (data[i]), bytes_per_sample,
-				&wav_file);
-	}
-
-	f_close(&wav_file);
-}
 
 void write_wav_from_csv(char *sourceName, char *destName,
 		uint32_t num_samples, uint16_t s_rate) {
