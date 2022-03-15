@@ -346,8 +346,8 @@ int main(void) {
 				}
 
 				//Borro la ultima ',' del archivo
-				f_lseek(&filteredData, f_tell(&filteredData) - 1);
-				f_putc('\0', &filteredData);
+				//f_lseek(&filteredData, f_tell(&filteredData) - 1);
+				//f_putc('\0', &filteredData);
 
 			}
 
@@ -357,7 +357,15 @@ int main(void) {
 
 			//Creo  un archivo .wav a partir de un archivo csv con esta funcion
 			write_wav_from_csv("unf.csv", "unfilt.wav", muestras, sampleRate);
+			sprintf(buffer, "Done unfilt");
+			CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
+			memset(buffer, 0, strlen(buffer));
+			HAL_Delay(200);
 			write_wav_from_csv("filtered.csv", "filt.wav", muestras, sampleRate);
+			sprintf(buffer, "Done filt");
+			CDC_Transmit_FS((uint8_t*) buffer, strlen(buffer));
+			memset(buffer, 0, strlen(buffer));
+			HAL_Delay(200);
 
 			f_mount(NULL, "", 1); //Desmonto la SD
 

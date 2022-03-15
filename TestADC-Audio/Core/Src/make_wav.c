@@ -151,7 +151,9 @@ void write_wav_from_csv(char *sourceName, char *destName,
 			//Escalo el valor del adc (0 a 4095) a valores int16_t que van desde -32768 a 32767
 			normalizedNumber = (((65535)/(4095))*intNumber) - 32768;
 
-			write_little_endian((int16_t) (intNumber), bytes_per_sample,
+			//if(normalizedNumber != 0) //Si el wav arranca con datos 0 se chotea
+
+			write_little_endian((int16_t) (normalizedNumber), bytes_per_sample,
 							&wav_file);
 
 			memset(readBuffer, 0, strlen(readBuffer));
