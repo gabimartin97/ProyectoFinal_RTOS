@@ -13,8 +13,6 @@
 extern ADC_HandleTypeDef hadc1; //Definida en main.c
 
 /*----------------------TARJETA SD ------------------------------------------*/
-static const char *SD_errorSD_okMsg = "ERROR IN MOUNTING SD CARD \n";
-static const char *SD_okMsg = "SD CARD mounted successfully \n";
 
 FATFS fs; //file system
 FIL fil; //file
@@ -34,8 +32,8 @@ UINT br, bw;  //file read/write count
  * tconv sampleRate = 1/tconv
  */
 // ---------FRECUENCIA DE MUESTREO ----------/
-#define adcBuff1Size 500
-#define adcBuff2Size 500
+#define adcBuff1Size 500 //Tamaño definido a ojo
+#define adcBuff2Size 500 //Tamaño definido a ojo
 static uint32_t adcBuff1[adcBuff1Size]; //Buffer 1 para almacenar lecturas del ADC
 static uint32_t adcBuff2[adcBuff2Size]; //Buffer 2 para almacenar lecturas del ADC
 int adcCount1 = 0;
@@ -52,6 +50,7 @@ static const uint32_t muestras = recordingTime * sampleRate; //Cantidad de muest
 /****************FILTRO*********************/
 #define FIR_FILTER_LENGHT 64
 FIRFilter filtroPB;
+//Coeficientes del filtro
 static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = { -0.0005017f,
 		-0.0010401f, -0.0015571f, -0.0019069f, -0.0019183f, -0.0014621f,
 		-0.0005568f, 0.0005421f, 0.0013410f, 0.0012421f, -0.0002012f,
@@ -72,7 +71,15 @@ FIL filteredData;
 float circularBuffer[FIR_FILTER_LENGHT] = { 0 };
 UINT br2, bw2;  //file read/write count
 		/****************FILTRO*********************/
+/* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
+static const char* wav = ".wav";
+static const char* csv = ".csv";
+static const char* filtrada = "filt%i";
+static const char* grabacion = "unf%i";
 
+char nombreArchivo1[24]={0};
+char nombreArchivo2[24]={0};
+int numGrabacion=0;
 /**********************PROTOTIPO DE FUNCIONES ****************************/
 void SerialWrite(char *mensaje, int size);
 
@@ -86,7 +93,7 @@ void EjecutarSetup() // Contiene el programa que se ejecuta antes del bucle infi
 	uint32_t total, free_space;
 	/*Variables relacionadas con la capacidad de la tarjeta SD*/
 
-	HAL_Delay(100);
+	HAL_Delay(1000);
 	/*-----------------Montaje de la tarjeta SD -----------*/
 	if (f_mount(&fs, "", 0) != FR_OK) {
 
@@ -118,17 +125,6 @@ void EjecutarSetup() // Contiene el programa que se ejecuta antes del bucle infi
 
 	HAL_Delay(500);
 
-	if (f_mount(&fs, "", 0) != FR_OK) {
-
-		CDC_Transmit_FS((uint8_t*) SD_errorSD_okMsg, strlen(SD_errorSD_okMsg));
-	} else {
-
-		CDC_Transmit_FS((uint8_t*) SD_okMsg, strlen(SD_okMsg));
-
-	}
-	memset(buffer, 0, strlen(buffer));
-	HAL_Delay(1000);
-
 }
 
 void EjecutarLoop() {
@@ -141,6 +137,7 @@ void EjecutarLoop() {
 	if (!start
 			&& (HAL_GPIO_ReadPin(Pulsador_GPIO_Port, Pulsador_Pin)== GPIO_PIN_RESET)) {
 		start = true;
+		numGrabacion++;
 
 		/*-----------------Montaje de la tarjeta SD -----------*/
 		if (f_mount(&fs, "", 0) != FR_OK) {
@@ -154,7 +151,13 @@ void EjecutarLoop() {
 		/*-----------------Montaje de la tarjeta SD -----------*/
 		HAL_Delay(200);
 		/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
-			if (f_open(&unfilteredData, "unf.csv", FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
+		memset(nombreArchivo1, 0, strlen(nombreArchivo1));
+		memset(nombreArchivo2, 0, strlen(nombreArchivo2));
+		//strcat(nombreArchivo1,grabacion);
+		sprintf(nombreArchivo1,grabacion,numGrabacion);
+		strcat(nombreArchivo1,csv);
+
+		if (f_open(&unfilteredData, nombreArchivo1, FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 				SerialWrite("ERROR abriendo unfiltered 1\n", 28);
 		}
 		/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
@@ -166,7 +169,7 @@ void EjecutarLoop() {
 		 * el valor del pin del ADC, lo almacena en los adcBuff e incrementa los contadores
 		 * adcCount.*/
 		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-		SerialWrite("Comenzando adquisición de muestras\n", 35);
+		SerialWrite("Comenzando adquisicion de muestras\n", 35);
 		HAL_ADC_Start_IT(&hadc1);
 
 	}
@@ -199,7 +202,7 @@ void EjecutarLoop() {
 			{
 
 		HAL_ADC_Stop_IT(&hadc1); 				//Detenemos el ADC
-		SerialWrite("Finalizada la adquisición de muestras\n", 38);
+		SerialWrite("Finalizada la adquisicion de muestras\n", 38);
 		if (buff1 && adcCount1 > 0 && adcCount1 < adcBuff1Size) { //almacenamos lo que quedó del buff 1
 
 			for (int i = 0; i < (adcCount1 - 1); i++) {
@@ -231,14 +234,18 @@ void EjecutarLoop() {
 		FIRFilter_Init(&filtroPB, FIR_IMPULSE_RESPONSE, circularBuffer,
 		FIR_FILTER_LENGHT); 		//inicio el filtro
 
-		if (f_open(&filteredData, "filtered.csv", //Creo el archivo para almacenar muestras filtradas
+		//strcat(nombreArchivo2,filtrada);
+		sprintf(nombreArchivo2,filtrada,numGrabacion);
+		strcat(nombreArchivo2,csv);
+
+		if (f_open(&filteredData, nombreArchivo2, //Creo el archivo para almacenar muestras filtradas
 				FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 			SerialWrite("ERROR abriendo filtered 1\n", 26);
 		}
 
 		HAL_Delay(100);
 
-		if (f_open(&unfilteredData, "unf.csv", FA_READ) != FR_OK) {	//Abro el archivo de las muestras sin filtro
+		if (f_open(&unfilteredData, nombreArchivo1, FA_READ) != FR_OK) {	//Abro el archivo de las muestras sin filtro
 			SerialWrite("ERROR abriendo unfiltered 2\n", 28);
 		} else {
 
@@ -296,10 +303,27 @@ void EjecutarLoop() {
 		SerialWrite("Comienza la creacion del archivo WAV\n", 37);
 
 		//Creo  un archivo .wav a partir de un archivo csv con esta funcion
-		write_wav_from_csv("unf.csv", "unfilt.wav", muestras, sampleRate);
+
+		memset(nombreArchivo2, 0, strlen(nombreArchivo2));
+		//strcat(nombreArchivo2,grabacion);
+		sprintf(nombreArchivo2,grabacion,numGrabacion);
+		strcat(nombreArchivo2,wav);
+
+		write_wav_from_csv(nombreArchivo1, nombreArchivo2, muestras, sampleRate);
 		SerialWrite("Listo el WAV sin filtrar\n", 25);
 		HAL_Delay(200);
-		write_wav_from_csv("filtered.csv", "filt.wav", muestras,
+
+		memset(nombreArchivo1, 0, strlen(nombreArchivo1));
+		memset(nombreArchivo2, 0, strlen(nombreArchivo2));
+		//strcat(nombreArchivo1,filtrada);
+		sprintf(nombreArchivo1,filtrada,numGrabacion);
+		strcat(nombreArchivo1,csv);
+
+		//strcat(nombreArchivo2,filtrada);
+		sprintf(nombreArchivo2,filtrada,numGrabacion);
+		strcat(nombreArchivo2,wav);
+
+		write_wav_from_csv(nombreArchivo1,nombreArchivo2, muestras,
 		sampleRate);
 		SerialWrite("Listo el WAV filtrado\n", 22);
 		HAL_Delay(200);
@@ -307,6 +331,8 @@ void EjecutarLoop() {
 		f_mount(NULL, "", 1); //Desmonto la SD
 
 		SerialWrite("Listo\n", 6);
+
+		start=false;
 	}
 }
 
