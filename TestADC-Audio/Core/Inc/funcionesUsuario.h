@@ -11,7 +11,7 @@
 #include "make_wav.h"
 
 extern ADC_HandleTypeDef hadc1; //Definida en main.c
-
+extern TIM_HandleTypeDef htim11; //Timer para parpadear led
 /*----------------------TARJETA SD ------------------------------------------*/
 
 FATFS fs; //file system
@@ -24,7 +24,7 @@ UINT br, bw;  //file read/write count
 /*----------------------TARJETA SD ------------------------------------------*/
 
 /*----------------------ADC------------------------------------------*/
-#define recordingTime 5 // Tiempo de grabacion en segundos
+#define recordingTime 8 // Tiempo de grabacion en segundos
 // ---------FRECUENCIA DE MUESTREO ----------/
 #define  sampleRate 5303
 /* Calculado ->>
@@ -74,8 +74,8 @@ UINT br2, bw2;  //file read/write count
 /* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
 static const char* wav = ".wav";
 static const char* csv = ".csv";
-static const char* filtrada = "filt%i";
-static const char* grabacion = "unf%i";
+static const char* filtrada = "%i_filt"; //El %i sirve para que la funcion sprintf lo reemplaze por un numero
+static const char* grabacion = "%i_unf";
 
 char nombreArchivo1[24]={0};
 char nombreArchivo2[24]={0};
@@ -124,6 +124,7 @@ void EjecutarSetup() // Contiene el programa que se ejecuta antes del bucle infi
 	f_mount(NULL, "", 1);  //desmonto la tarjeta SD
 
 	HAL_Delay(500);
+	HAL_TIM_Base_Start_IT(&htim11);  //Arranca el parpadeo del led
 
 }
 
@@ -168,6 +169,7 @@ void EjecutarLoop() {
 		 * Automaticamente se ejecuta una interrupcion con una frecuencia aprox de 5khz que toma
 		 * el valor del pin del ADC, lo almacena en los adcBuff e incrementa los contadores
 		 * adcCount.*/
+		HAL_TIM_Base_Stop_IT(&htim11); //Detengo el parpadeo del LED
 		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 		SerialWrite("Comenzando adquisicion de muestras\n", 35);
 		HAL_ADC_Start_IT(&hadc1);
@@ -333,6 +335,7 @@ void EjecutarLoop() {
 		SerialWrite("Listo\n", 6);
 
 		start=false;
+		HAL_TIM_Base_Start_IT(&htim11);
 	}
 }
 
