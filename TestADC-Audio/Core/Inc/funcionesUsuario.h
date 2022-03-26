@@ -17,7 +17,7 @@ extern TIM_HandleTypeDef htim11; //Timer para parpadear led
 FATFS fs; //file system
 FIL fil; //file
 FRESULT fresult; //to store the result
-char buffer[1024]; // buffer para enviar y recibir mensajes por usb
+char buffer[100]; // buffer para enviar y recibir mensajes por usb
 
 UINT br, bw;  //file read/write count
 
@@ -32,8 +32,8 @@ UINT br, bw;  //file read/write count
  * tconv sampleRate = 1/tconv
  */
 // ---------FRECUENCIA DE MUESTREO ----------/
-#define adcBuff1Size 500 //Tamaño definido a ojo
-#define adcBuff2Size 500 //Tamaño definido a ojo
+#define adcBuff1Size 1000 //Tamaño definido a ojo
+#define adcBuff2Size 1000 //Tamaño definido a ojo
 static uint32_t adcBuff1[adcBuff1Size]; //Buffer 1 para almacenar lecturas del ADC
 static uint32_t adcBuff2[adcBuff2Size]; //Buffer 2 para almacenar lecturas del ADC
 int adcCount1 = 0;
@@ -42,7 +42,7 @@ static bool buff1 = true;
 static bool buff2 = false;
 bool doneADC = false;
 static bool start = false;
-
+bool errorFlag = false;
 uint32_t samples_count = 0; //Contador de muestras
 static const uint32_t muestras = recordingTime * sampleRate; //Cantidad de muestras totales que se deben adquirir
 /*----------------------ADC------------------------------------------*/
@@ -51,20 +51,7 @@ static const uint32_t muestras = recordingTime * sampleRate; //Cantidad de muest
 #define FIR_FILTER_LENGHT 64
 FIRFilter filtroPB;
 //Coeficientes del filtro
-static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = { -0.0005017f,
-		-0.0010401f, -0.0015571f, -0.0019069f, -0.0019183f, -0.0014621f,
-		-0.0005568f, 0.0005421f, 0.0013410f, 0.0012421f, -0.0002012f,
-		-0.0029985f, -0.0065400f, -0.0096489f, -0.0109215f, -0.0092850f,
-		-0.0045845f, 0.0020577f, 0.0083285f, 0.0113412f, 0.0086597f,
-		-0.0005801f, -0.0148709f, -0.0302278f, -0.0409512f, -0.0411462f,
-		-0.0265899f, 0.0036339f, 0.0463075f, 0.0944202f, 0.1386798f, 0.1698179f,
-		0.1810296f, 0.1698179f, 0.1386798f, 0.0944202f, 0.0463075f, 0.0036339f,
-		-0.0265899f, -0.0411462f, -0.0409512f, -0.0302278f, -0.0148709f,
-		-0.0005801f, 0.0086597f, 0.0113412f, 0.0083285f, 0.0020577f,
-		-0.0045845f, -0.0092850f, -0.0109215f, -0.0096489f, -0.0065400f,
-		-0.0029985f, -0.0002012f, 0.0012421f, 0.0013410f, 0.0005421f,
-		-0.0005568f, -0.0014621f, -0.0019183f, -0.0019069f, -0.0015571f,
-		-0.0010401f };
+static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = {0.0000931f,-0.0004265f,-0.0008944f,-0.0011645f,-0.0010662f,-0.0004706f,0.0006027f,0.0018970f,0.0029171f,0.0030636f,0.0018874f,-0.0006233f,-0.0038613f,-0.0066528f,-0.0075969f,-0.0056241f,-0.0005826f,0.0064017f,0.0130127f,0.0163599f,0.0140041f,0.0050780f,-0.0089145f,-0.0239914f,-0.0344560f,-0.0344159f,-0.0196507f,0.0107535f,0.0535774f,0.1018086f,0.1461537f,0.1773435f,0.1885725f,0.1773435f,0.1461537f,0.1018086f,0.0535774f,0.0107535f,-0.0196507f,-0.0344159f,-0.0344560f,-0.0239914f,-0.0089145f,0.0050780f,0.0140041f,0.0163599f,0.0130127f,0.0064017f,-0.0005826f,-0.0056241f,-0.0075969f,-0.0066528f,-0.0038613f,-0.0006233f,0.0018874f,0.0030636f,0.0029171f,0.0018970f,0.0006027f,-0.0004706f,-0.0010662f,-0.0011645f,-0.0008944f,-0.0004265f};
 
 FIL unfilteredData;
 FIL filteredData;
@@ -172,6 +159,8 @@ void EjecutarLoop() {
 		HAL_TIM_Base_Stop_IT(&htim11); //Detengo el parpadeo del LED
 		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 		SerialWrite("Comenzando adquisicion de muestras\n", 35);
+		memset(adcBuff1, 0, sizeof(adcBuff1));
+		memset(adcBuff2, 0, sizeof(adcBuff2));
 		HAL_ADC_Start_IT(&hadc1);
 
 	}
@@ -205,7 +194,7 @@ void EjecutarLoop() {
 
 		HAL_ADC_Stop_IT(&hadc1); 				//Detenemos el ADC
 		SerialWrite("Finalizada la adquisicion de muestras\n", 38);
-		if (buff1 && adcCount1 > 0 && adcCount1 < adcBuff1Size) { //almacenamos lo que quedó del buff 1
+		if (buff1 && adcCount1 > 0 ) { //almacenamos lo que quedó del buff 1
 
 			for (int i = 0; i < (adcCount1 - 1); i++) {
 
@@ -213,7 +202,7 @@ void EjecutarLoop() {
 			}
 			f_printf(&unfilteredData, "%04u", adcBuff1[adcCount1 - 1]); // Ultima muestra sin coma ','
 		}
-		if (buff2 && adcCount2 > 0 && adcCount2 < adcBuff2Size) { //almacenamos lo que quedó del buff 2
+		if (buff2 && adcCount2 > 0) { //almacenamos lo que quedó del buff 2
 
 			for (int i = 0; i < (adcCount2 - 1); i++) {
 
@@ -226,6 +215,10 @@ void EjecutarLoop() {
 		HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 		samples_count = 0;
 		doneADC = true;
+		buff1 = true;	//hago que el ADC comience a almacenar en el buff1
+		buff2 = false;
+		adcCount1 = 0;
+		adcCount2 = 0;
 		HAL_Delay(1000);
 
 	}

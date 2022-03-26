@@ -238,7 +238,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -334,11 +334,13 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 	if (buff1 && (adcCount1 < adcBuff1Size)) {
 		adcBuff1[adcCount1++] = HAL_ADC_GetValue(&hadc1);
 		samples_count++;
-	}
-
-	if (buff2 && (adcCount2 < adcBuff2Size)) {
+	}else if (buff2 && (adcCount2 < adcBuff2Size))
+	{
 		adcBuff2[adcCount2++] = HAL_ADC_GetValue(&hadc1);
 		samples_count++;
+	}else
+	{
+		errorFlag=true;
 	}
 	/*If continuousconversion mode is DISABLED uncomment below*/
 	HAL_ADC_Start_IT(&hadc1);
