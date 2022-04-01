@@ -340,7 +340,8 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 		samples_count++;
 	}else
 	{
-		errorFlag=true;
+		//HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin); //DEBUG
+		//Encender bit de falla
 	}
 	/*If continuousconversion mode is DISABLED uncomment below*/
 	HAL_ADC_Start_IT(&hadc1);

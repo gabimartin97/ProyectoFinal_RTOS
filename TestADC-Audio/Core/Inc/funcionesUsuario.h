@@ -24,7 +24,7 @@ UINT br, bw;  //file read/write count
 /*----------------------TARJETA SD ------------------------------------------*/
 
 /*----------------------ADC------------------------------------------*/
-#define recordingTime 8 // Tiempo de grabacion en segundos
+#define recordingTime 10 // Tiempo de grabacion en segundos
 // ---------FRECUENCIA DE MUESTREO ----------/
 #define  sampleRate 5303
 /* Calculado ->>
