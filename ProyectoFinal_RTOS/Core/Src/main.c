@@ -47,20 +47,18 @@ ADC_HandleTypeDef hadc1;
 
 SPI_HandleTypeDef hspi1;
 
-osThreadId Tarea1Handle;
-osThreadId Tarea2Handle;
-osThreadId Tarea3Handle;
+osThreadId LecturaPulsadorHandle;
 osThreadId GuardarSDHandle;
 osMessageQId ADC_QueueHandle;
 /* USER CODE BEGIN PV */
+static bool start = false;
 
-//https://youtu.be/spVIZO-jbxE?t=485
 /*----------------------TARJETA SD ------------------------------------------*/
 
 FATFS fs; //file system
 FIL fil; //file
 FRESULT fresult; //to store the result
-char buffer[100]; // buffer para enviar y recibir mensajes por usb
+
 
 UINT br, bw;  //file read/write count
 
@@ -80,6 +78,16 @@ uint32_t samples_count = 0; //Contador de muestras
 uint16_t contadorTest =0;
 static const uint32_t muestras = recordingTime * sampleRate; //Cantidad de muestras totales que se deben adquirir
 FIL unfilteredData;
+
+/* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
+static const char* wav = ".wav";
+static const char* csv = ".csv";
+static const char* filtrada = "%i_filt"; //El %i sirve para que la funcion sprintf lo reemplaze por un numero
+static const char* grabacion = "%i_unf";
+
+char nombreArchivo1[24]={0};
+char nombreArchivo2[24]={0};
+int numGrabacion=0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,9 +95,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
-void StartTarea1(void const * argument);
-void StartTarea2(void const * argument);
-void StartTarea3(void const * argument);
+void StartLecturaPulsadores(void const * argument);
 void StartGuardarSD(void const * argument);
 
 /* USER CODE BEGIN PFP */
@@ -158,17 +164,9 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of Tarea1 */
-  osThreadDef(Tarea1, StartTarea1, osPriorityNormal, 0, 128);
-  Tarea1Handle = osThreadCreate(osThread(Tarea1), NULL);
-
-  /* definition and creation of Tarea2 */
-  osThreadDef(Tarea2, StartTarea2, osPriorityNormal, 0, 128);
-  Tarea2Handle = osThreadCreate(osThread(Tarea2), NULL);
-
-  /* definition and creation of Tarea3 */
-  osThreadDef(Tarea3, StartTarea3, osPriorityNormal, 0, 128);
-  Tarea3Handle = osThreadCreate(osThread(Tarea3), NULL);
+  /* definition and creation of LecturaPulsador */
+  osThreadDef(LecturaPulsador, StartLecturaPulsadores, osPriorityLow, 0, 128);
+  LecturaPulsadorHandle = osThreadCreate(osThread(LecturaPulsador), NULL);
 
   /* definition and creation of GuardarSD */
   osThreadDef(GuardarSD, StartGuardarSD, osPriorityRealtime, 0, 1024);
@@ -384,14 +382,14 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartTarea1 */
+/* USER CODE BEGIN Header_StartLecturaPulsadores */
 /**
-  * @brief  Function implementing the Tarea1 thread.
+  * @brief  Function implementing the LecturaPulsador thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartTarea1 */
-void StartTarea1(void const * argument)
+/* USER CODE END Header_StartLecturaPulsadores */
+void StartLecturaPulsadores(void const * argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
@@ -399,11 +397,13 @@ void StartTarea1(void const * argument)
   {
 
 
-    if(HAL_GPIO_ReadPin(Pulsador_GPIO_Port, Pulsador_Pin) == GPIO_PIN_RESET)
+    if(!start && (HAL_GPIO_ReadPin(Pulsador_GPIO_Port, Pulsador_Pin) == GPIO_PIN_RESET)) //Si presiono pulsador
 
     {
-    	//osSignalSet(Tarea2Handle, 1);
-    	HAL_ADC_Start_IT(&hadc1);
+
+    	start=true;
+    	numGrabacion++;
+    	HAL_ADC_Start_IT(&hadc1); //Comienza a trabajar el ADC por interrupcion
     	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
     	 osDelay(1000);
     }
@@ -412,46 +412,6 @@ void StartTarea1(void const * argument)
 
   }
   /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartTarea2 */
-/**
-* @brief Function implementing the Tarea2 thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTarea2 */
-void StartTarea2(void const * argument)
-{
-  /* USER CODE BEGIN StartTarea2 */
-  /* Infinite loop */
-  for(;;)
-  {
-
-    osSignalWait(1, osWaitForever);
-    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    osDelay(100);
-  }
-  /* USER CODE END StartTarea2 */
-}
-
-/* USER CODE BEGIN Header_StartTarea3 */
-/**
-* @brief Function implementing the Tarea3 thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartTarea3 */
-void StartTarea3(void const * argument)
-{
-  /* USER CODE BEGIN StartTarea3 */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1000);
-
-  }
-  /* USER CODE END StartTarea3 */
 }
 
 /* USER CODE BEGIN Header_StartGuardarSD */
