@@ -49,10 +49,14 @@ SPI_HandleTypeDef hspi1;
 
 osThreadId LecturaPulsadorHandle;
 osThreadId GuardarSDHandle;
+osThreadId MainTaskHandle;
 osMessageQId ADC_QueueHandle;
+osMessageQId Pulsadores_QueueHandle;
 /* USER CODE BEGIN PV */
+static bool ready = true;
 static bool start = false;
-
+static bool grabarECG = false;
+static bool grabarAudio = false;
 /*----------------------TARJETA SD ------------------------------------------*/
 
 FATFS fs; //file system
@@ -87,7 +91,17 @@ static const char* grabacion = "%i_unf";
 
 char nombreArchivo1[24]={0};
 char nombreArchivo2[24]={0};
-int numGrabacion=0;
+int numGrabacionECG=0;
+int numGrabacionAudio=0;
+
+
+
+
+
+
+
+// ---------PULSADORES ----------/
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -97,6 +111,7 @@ static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
 void StartLecturaPulsadores(void const * argument);
 void StartGuardarSD(void const * argument);
+void StartMainTask(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -159,6 +174,10 @@ int main(void)
   osMessageQDef(ADC_Queue, 1000, uint16_t);
   ADC_QueueHandle = osMessageCreate(osMessageQ(ADC_Queue), NULL);
 
+  /* definition and creation of Pulsadores_Queue */
+  osMessageQDef(Pulsadores_Queue, 1, uint16_t);
+  Pulsadores_QueueHandle = osMessageCreate(osMessageQ(Pulsadores_Queue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -171,6 +190,10 @@ int main(void)
   /* definition and creation of GuardarSD */
   osThreadDef(GuardarSD, StartGuardarSD, osPriorityRealtime, 0, 1024);
   GuardarSDHandle = osThreadCreate(osThread(GuardarSD), NULL);
+
+  /* definition and creation of MainTask */
+  osThreadDef(MainTask, StartMainTask, osPriorityNormal, 0, 128);
+  MainTaskHandle = osThreadCreate(osThread(MainTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -342,7 +365,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, SD_CS_Pin|LED3_Pin|LED2_Pin|LED1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : LED_Pin */
   GPIO_InitStruct.Pin = LED_Pin;
@@ -357,12 +380,18 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(Pulsador_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SD_CS_Pin */
-  GPIO_InitStruct.Pin = SD_CS_Pin;
+  /*Configure GPIO pins : SD_CS_Pin LED3_Pin LED2_Pin LED1_Pin */
+  GPIO_InitStruct.Pin = SD_CS_Pin|LED3_Pin|LED2_Pin|LED1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : SW_1_Pin SW_2_Pin SW_3_Pin */
+  GPIO_InitStruct.Pin = SW_1_Pin|SW_2_Pin|SW_3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 }
 
@@ -394,20 +423,27 @@ void StartLecturaPulsadores(void const * argument)
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)
+
   {
+	if(HAL_GPIO_ReadPin(SW_1_GPIO_Port, SW_1_Pin) == GPIO_PIN_RESET)
+		{
+			osMessagePut(Pulsadores_QueueHandle, 1, 100);
+			osDelay(250);
+
+		}
+	if(HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin) == GPIO_PIN_RESET)
+		{
+			osMessagePut(Pulsadores_QueueHandle, 2, 100);
+			osDelay(250);
+		}
+	if(HAL_GPIO_ReadPin(SW_3_GPIO_Port, SW_3_Pin) == GPIO_PIN_RESET)
+		{
+			osMessagePut(Pulsadores_QueueHandle, 3, 100);
+			osDelay(250);
+		}
 
 
-    if(!start && (HAL_GPIO_ReadPin(Pulsador_GPIO_Port, Pulsador_Pin) == GPIO_PIN_RESET)) //Si presiono pulsador
-
-    {
-
-    	start=true;
-    	numGrabacion++;
-    	HAL_ADC_Start_IT(&hadc1); //Comienza a trabajar el ADC por interrupcion
-    	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    	 osDelay(1000);
-    }
-    osDelay(100);
+    osDelay(50);
 
 
   }
@@ -474,6 +510,72 @@ void StartGuardarSD(void const * argument)
 
   }
   /* USER CODE END StartGuardarSD */
+}
+
+/* USER CODE BEGIN Header_StartMainTask */
+/**
+* @brief Function implementing the MainTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartMainTask */
+void StartMainTask(void const * argument)
+{
+  /* USER CODE BEGIN StartMainTask */
+  /* Infinite loop */
+  for(;;)
+  {
+
+	  /*-----------------PULSADORES PRESIONADOS ---------------------*/
+	  if(osMessageWaiting(Pulsadores_QueueHandle) > 0)
+	  {
+		  uint32_t pulsador = osMessageGet(Pulsadores_QueueHandle, 0).value.v;
+
+		  switch(pulsador)
+		  {
+		  case 1:
+			  if(ready)start=!start;
+
+			  HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+
+			  break;
+		  case 2:
+			  if(ready)grabarECG = !grabarECG;
+			  HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+		  	  break;
+		  case 3:
+			  if(ready)grabarAudio = !grabarAudio;
+			  HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
+		  	  break;
+		  default: break;
+		  }
+
+		/*-----------------PULSADORES PRESIONADOS ---------------------*/
+	  }
+
+	  if(start && ready)
+	  {
+		  start = false;
+		  ready = false;
+
+		  if(grabarAudio)
+
+		      {
+
+		      	numGrabacionAudio++;
+		      	HAL_ADC_Start_IT(&hadc1); //Comienza a trabajar el ADC por interrupcion
+		      	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+		      	 osDelay(1000);
+		      }
+
+	  }
+
+
+
+
+    osDelay(50);
+  }
+  /* USER CODE END StartMainTask */
 }
 
 /**
