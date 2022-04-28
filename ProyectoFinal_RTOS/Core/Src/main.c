@@ -54,6 +54,7 @@ osThreadId ManejoLEDsHandle;
 osThreadId RunningTaskHandle;
 osMessageQId ADC1_QueueHandle;
 osMessageQId Pulsadores_QueueHandle;
+osMessageQId SD_CMD_QueueHandle;
 /* USER CODE BEGIN PV */
 
 // ---------ESTADOS DEL PROGRAMA----------/
@@ -75,6 +76,15 @@ FRESULT fresult; //to store the result
 
 UINT br, bw;  //file read/write count
 
+typedef enum
+{
+	CMD_Nada,					//Ninguno
+	CMD_GrabarADC_ECG,
+	CMD_GrabarADC_Audio,
+	CMD_Filtrdo_Audio,
+	CMD_ArchivoWav
+
+}ComandosSD;
 /*----------------------TARJETA SD ------------------------------------------*/
 
 /*----------------------ADC------------------------------------------*/
@@ -191,6 +201,10 @@ int main(void)
   /* definition and creation of Pulsadores_Queue */
   osMessageQDef(Pulsadores_Queue, 1, uint16_t);
   Pulsadores_QueueHandle = osMessageCreate(osMessageQ(Pulsadores_Queue), NULL);
+
+  /* definition and creation of SD_CMD_Queue */
+  osMessageQDef(SD_CMD_Queue, 5, uint16_t);
+  SD_CMD_QueueHandle = osMessageCreate(osMessageQ(SD_CMD_Queue), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
@@ -486,7 +500,7 @@ void StartLecturaPulsadores(void const * argument)
 /* USER CODE END Header_StartTarjetaSD */
 void StartTarjetaSD(void const * argument)
 {
-  /* USER CODE BEGIN StartGuardarSD */
+  /* USER CODE BEGIN StartTarjetaSD */
 
 
 	uint32_t escritos = 0;
