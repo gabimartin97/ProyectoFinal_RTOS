@@ -48,11 +48,11 @@ ADC_HandleTypeDef hadc1;
 SPI_HandleTypeDef hspi1;
 
 osThreadId LecturaPulsadorHandle;
-osThreadId GuardarSDHandle;
+osThreadId TarjetaSDHandle;
 osThreadId MainTaskHandle;
 osThreadId ManejoLEDsHandle;
 osThreadId RunningTaskHandle;
-osMessageQId ADC_QueueHandle;
+osMessageQId ADC1_QueueHandle;
 osMessageQId Pulsadores_QueueHandle;
 /* USER CODE BEGIN PV */
 
@@ -102,7 +102,17 @@ char nombreArchivo2[24] = { 0 };
 int numGrabacionECG = 0;
 int numGrabacionAudio = 0;
 
-// ---------PULSADORES ----------/
+// ---------enum PULSADORES ----------/
+
+typedef enum
+{
+	P_None,					//Ninguno
+	P_Start_Stop,
+	P_GrabarECG,
+	P_GrabarAudio
+}Pulsadores;				//Los 3 pulsadores posibles. El 4to es de reset
+
+// ---------enum PULSADORES ----------/
 
 /* USER CODE END PV */
 
@@ -112,7 +122,7 @@ static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
 void StartLecturaPulsadores(void const * argument);
-void StartGuardarSD(void const * argument);
+void StartTarjetaSD(void const * argument);
 void StartMainTask(void const * argument);
 void StartManejoLEDs(void const * argument);
 void StartRunningTask(void const * argument);
@@ -174,9 +184,9 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* definition and creation of ADC_Queue */
-  osMessageQDef(ADC_Queue, 1000, uint16_t);
-  ADC_QueueHandle = osMessageCreate(osMessageQ(ADC_Queue), NULL);
+  /* definition and creation of ADC1_Queue */
+  osMessageQDef(ADC1_Queue, 500, uint16_t);
+  ADC1_QueueHandle = osMessageCreate(osMessageQ(ADC1_Queue), NULL);
 
   /* definition and creation of Pulsadores_Queue */
   osMessageQDef(Pulsadores_Queue, 1, uint16_t);
@@ -191,9 +201,9 @@ int main(void)
   osThreadDef(LecturaPulsador, StartLecturaPulsadores, osPriorityLow, 0, 128);
   LecturaPulsadorHandle = osThreadCreate(osThread(LecturaPulsador), NULL);
 
-  /* definition and creation of GuardarSD */
-  osThreadDef(GuardarSD, StartGuardarSD, osPriorityHigh, 0, 1024);
-  GuardarSDHandle = osThreadCreate(osThread(GuardarSD), NULL);
+  /* definition and creation of TarjetaSD */
+  osThreadDef(TarjetaSD, StartTarjetaSD, osPriorityHigh, 0, 1024);
+  TarjetaSDHandle = osThreadCreate(osThread(TarjetaSD), NULL);
 
   /* definition and creation of MainTask */
   osThreadDef(MainTask, StartMainTask, osPriorityNormal, 0, 512);
@@ -410,10 +420,10 @@ static void MX_GPIO_Init(void)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
-	osMessagePut(ADC_QueueHandle, HAL_ADC_GetValue(&hadc1), 0);
+	osMessagePut(ADC1_QueueHandle, HAL_ADC_GetValue(&hadc1), 0);
 	samples_count++;
 
-	//osMessagePut(ADC_QueueHandle, contadorTest++, 0); Prueba para ver si se graban todos los valores
+	//osMessagePut(ADC1_QueueHandle, contadorTest++, 0); Prueba para ver si se graban todos los valores
 	/*If continuousconversion mode is DISABLED uncomment below*/
 	if (samples_count < muestras)
 	{
@@ -439,20 +449,24 @@ void StartLecturaPulsadores(void const * argument)
 {
   /* USER CODE BEGIN 5 */
 	/* Infinite loop */
+	Pulsadores teclaPulsada = P_None;
 	for (;;)
 
 	{
 
 		if (HAL_GPIO_ReadPin(SW_1_GPIO_Port, SW_1_Pin) == GPIO_PIN_RESET) {
-			osMessagePut(Pulsadores_QueueHandle, 1, 100);
+			teclaPulsada = P_Start_Stop;
+			osMessagePut(Pulsadores_QueueHandle,teclaPulsada,100);
 			osDelay(250);
 
 		}
 		if (HAL_GPIO_ReadPin(SW_2_GPIO_Port, SW_2_Pin) == GPIO_PIN_RESET) {
-			osMessagePut(Pulsadores_QueueHandle, 2, 100);
+			teclaPulsada = P_GrabarECG;
+			osMessagePut(Pulsadores_QueueHandle, teclaPulsada, 100);
 			osDelay(250);
 		}
 		if (HAL_GPIO_ReadPin(SW_3_GPIO_Port, SW_3_Pin) == GPIO_PIN_RESET) {
+			teclaPulsada = P_GrabarAudio;
 			osMessagePut(Pulsadores_QueueHandle, 3, 100);
 			osDelay(250);
 		}
@@ -463,14 +477,14 @@ void StartLecturaPulsadores(void const * argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_StartGuardarSD */
+/* USER CODE BEGIN Header_StartTarjetaSD */
 /**
- * @brief Function implementing the GuardarSD thread.
- * @param argument: Not used
- * @retval None
- */
-/* USER CODE END Header_StartGuardarSD */
-void StartGuardarSD(void const * argument)
+* @brief Function implementing the TarjetaSD thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartTarjetaSD */
+void StartTarjetaSD(void const * argument)
 {
   /* USER CODE BEGIN StartGuardarSD */
 
@@ -482,7 +496,7 @@ void StartGuardarSD(void const * argument)
 	if (f_mount(&fs, "", 1) != FR_OK) {
 
 		error = true; //Montaje de la tarjta SD fallidoç
-		osThreadSuspend(GuardarSDHandle);
+		osThreadSuspend(TarjetaSDHandle);
 	} else
 	{
 		osDelay(200);
@@ -505,7 +519,7 @@ void StartGuardarSD(void const * argument)
 			ready = true;
 
 		}
-		mensaje = osMessageGet(ADC_QueueHandle, osWaitForever);
+		mensaje = osMessageGet(ADC1_QueueHandle, osWaitForever);
 
 		if (mensaje.status == osEventMessage) {
 
@@ -517,7 +531,7 @@ void StartGuardarSD(void const * argument)
 		}
 
 	}
-  /* USER CODE END StartGuardarSD */
+  /* USER CODE END StartTarjetaSD */
 }
 
 /* USER CODE BEGIN Header_StartMainTask */
@@ -530,15 +544,16 @@ void StartGuardarSD(void const * argument)
 void StartMainTask(void const * argument)
 {
   /* USER CODE BEGIN StartMainTask */
+	Pulsadores teclaPulsada = P_None;
 	/* Infinite loop */
 	for (;;) {
 
 		/*-----------------PULSADORES PRESIONADOS ---------------------*/
 		if (osMessageWaiting(Pulsadores_QueueHandle) > 0) {
-			uint32_t pulsador = osMessageGet(Pulsadores_QueueHandle, 0).value.v;
+			teclaPulsada = osMessageGet(Pulsadores_QueueHandle, 0).value.v;
 
-			switch (pulsador) {
-			case 1:
+			switch (teclaPulsada) {
+			case P_Start_Stop:
 				if (ready) {
 					start = !start;
 				} else {
@@ -546,12 +561,12 @@ void StartMainTask(void const * argument)
 				}
 
 				break;
-			case 2:
+			case P_GrabarECG:
 				if (ready)
 					grabarECG = !grabarECG;
 
 				break;
-			case 3:
+			case P_GrabarAudio:
 				if (ready)
 					grabarAudio = !grabarAudio;
 
