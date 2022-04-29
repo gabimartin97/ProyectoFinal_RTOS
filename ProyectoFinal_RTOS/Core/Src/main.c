@@ -53,6 +53,8 @@ osThreadId MainTaskHandle;
 osThreadId ManejoLEDsHandle;
 osThreadId RunningTaskHandle;
 osMessageQId ADC1_QueueHandle;
+uint8_t ADC1_QueueBuffer[ 500 * sizeof( uint16_t ) ];
+osStaticMessageQDef_t ADC1_QueueControlBlock;
 osMessageQId Pulsadores_QueueHandle;
 osMessageQId SD_CMD_QueueHandle;
 /* USER CODE BEGIN PV */
@@ -195,7 +197,7 @@ int main(void)
 
   /* Create the queue(s) */
   /* definition and creation of ADC1_Queue */
-  osMessageQDef(ADC1_Queue, 500, uint16_t);
+  osMessageQStaticDef(ADC1_Queue, 500, uint16_t, ADC1_QueueBuffer, &ADC1_QueueControlBlock);
   ADC1_QueueHandle = osMessageCreate(osMessageQ(ADC1_Queue), NULL);
 
   /* definition and creation of Pulsadores_Queue */
@@ -285,7 +287,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV8;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV4;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
@@ -434,10 +436,10 @@ static void MX_GPIO_Init(void)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
-	//osMessagePut(ADC1_QueueHandle, HAL_ADC_GetValue(&hadc1), 0);
+	osMessagePut(ADC1_QueueHandle, HAL_ADC_GetValue(&hadc1), 0);
 	samples_count++;
 
-	osMessagePut(ADC1_QueueHandle, contadorTest++, 0);// Prueba para ver si se graban todos los valores
+	//osMessagePut(ADC1_QueueHandle, contadorTest++, 0);// Prueba para ver si se graban todos los valores
 	/*If continuousconversion mode is DISABLED uncomment below*/
 	if (samples_count < muestras)
 	{
@@ -535,7 +537,7 @@ void StartTarjetaSD(void const * argument)
 		switch (comandoMainTask)
 		{
 				case CMD_GrabarADC_Audio:
-					f_open(&unfilteredData, "PRUEBA2.csv", FA_CREATE_ALWAYS | FA_READ | FA_WRITE);
+					f_open(&unfilteredData, "PRUEBA3.csv", FA_CREATE_ALWAYS | FA_READ | FA_WRITE);
 					//osDelay(100);
 					AlmacenarADCAudio = true;
 
