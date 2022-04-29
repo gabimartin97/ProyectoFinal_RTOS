@@ -434,10 +434,10 @@ static void MX_GPIO_Init(void)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
-	osMessagePut(ADC1_QueueHandle, HAL_ADC_GetValue(&hadc1), 0);
+	//osMessagePut(ADC1_QueueHandle, HAL_ADC_GetValue(&hadc1), 0);
 	samples_count++;
 
-	//osMessagePut(ADC1_QueueHandle, contadorTest++, 0); Prueba para ver si se graban todos los valores
+	osMessagePut(ADC1_QueueHandle, contadorTest++, 0);// Prueba para ver si se graban todos los valores
 	/*If continuousconversion mode is DISABLED uncomment below*/
 	if (samples_count < muestras)
 	{
@@ -502,11 +502,10 @@ void StartTarjetaSD(void const * argument)
 {
   /* USER CODE BEGIN StartTarjetaSD */
 
+	ComandosSD comandoMainTask = CMD_Nada;
+	uint16_t datoADCAudio = 0;
 
-	uint32_t escritos = 0;
-	osEvent mensaje;
-	uint32_t valor = 0; // es un valor de 32 bits porque no puedo dereferenciar el (*void)p que llega
-
+	bool AlmacenarADCAudio = false;
 	if (f_mount(&fs, "", 1) != FR_OK) {
 
 		error = true; //Montaje de la tarjta SD fallidoç
@@ -514,7 +513,7 @@ void StartTarjetaSD(void const * argument)
 	} else
 	{
 		osDelay(200);
-		f_open(&unfilteredData, "PRUEBA.csv", FA_CREATE_ALWAYS | FA_READ | FA_WRITE);
+
 
 	}
 	osDelay(100);
@@ -524,25 +523,57 @@ void StartTarjetaSD(void const * argument)
 
 
 
+	//COMANDOS PROVENIENTES DE LA MAIN TASK
+		if (osMessageWaiting(SD_CMD_QueueHandle) > 0) {
+			comandoMainTask = osMessageGet(SD_CMD_QueueHandle, 0).value.v;
 
-		if (!grabandoAudio && (escritos >= muestras)) {
-			//cerrar archivo
-			f_close(&unfilteredData);
-			osDelay(100);
-			f_mount(NULL, "", 1); //Desmonto la SD
-			ready = true;
+		}else
+		{
+			comandoMainTask = CMD_Nada;
+		}
+
+		switch (comandoMainTask)
+		{
+				case CMD_GrabarADC_Audio:
+					f_open(&unfilteredData, "PRUEBA2.csv", FA_CREATE_ALWAYS | FA_READ | FA_WRITE);
+					//osDelay(100);
+					AlmacenarADCAudio = true;
+
+					break;
+				default:
+					break;
+		}
+
+
+
+		if(AlmacenarADCAudio)
+		{
+			if (osMessageWaiting(ADC1_QueueHandle) > 0)
+			{
+				datoADCAudio = (uint16_t)osMessageGet(ADC1_QueueHandle,0).value.v;
+				f_printf(&unfilteredData, "%u,",datoADCAudio);
+			}
+			else
+			{
+				if (samples_count >= muestras)
+				{
+				//cerrar archivo
+				f_close(&unfilteredData);
+				osDelay(100);
+				f_mount(NULL, "", 1); //Desmonto la SD
+				AlmacenarADCAudio = false;
+				ready = true;
+				}
+				osDelay(5);
+			}
+
 
 		}
-		mensaje = osMessageGet(ADC1_QueueHandle, osWaitForever);
-
-		if (mensaje.status == osEventMessage) {
-
-			valor = mensaje.value.v;
-			f_printf(&unfilteredData, "%u,", (uint16_t) valor);
-			escritos++;
-
-
+		else
+		{
+			osDelay(10);
 		}
+
 
 	}
   /* USER CODE END StartTarjetaSD */
@@ -604,7 +635,7 @@ void StartMainTask(void const * argument)
 				numGrabacionAudio++;
 				grabandoAudio = true;
 				HAL_ADC_Start_IT(&hadc1); //Comienza a trabajar el ADC Audio por interrupcion
-
+				osMessagePut(SD_CMD_QueueHandle, CMD_GrabarADC_Audio, 0);
 			}
 
 		}
