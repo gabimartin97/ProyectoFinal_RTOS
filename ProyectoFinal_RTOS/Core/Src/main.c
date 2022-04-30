@@ -58,6 +58,7 @@ uint8_t ADC1_QueueBuffer[ 500 * sizeof( uint16_t ) ];
 osStaticMessageQDef_t ADC1_QueueControlBlock;
 osMessageQId Pulsadores_QueueHandle;
 osMessageQId SD_CMD_QueueHandle;
+osMessageQId SD_STATUS_QueueHandle;
 /* USER CODE BEGIN PV */
 
 // ---------ESTADOS DEL PROGRAMA----------/
@@ -80,9 +81,21 @@ typedef enum
 	CMD_GrabarADC_ECG,
 	CMD_GrabarADC_Audio,
 	CMD_Filtrdo_Audio,
-	CMD_ArchivoWav
+	CMD_ArchivoWav,
+	CMD_Stop
 
 }ComandosSD;
+
+typedef enum
+{
+	STAT_Ready,					//Ninguno
+	STAT_Grbando_ECG,
+	STAT_Grbando_Audio,
+	STAT_Filtrando_Audio,
+	STAT_Creando_WAV,
+	STAT_Error
+
+}EstadoSD;
 /*----------------------TARJETA SD ------------------------------------------*/
 
 /*----------------------ADC------------------------------------------*/
@@ -196,6 +209,10 @@ int main(void)
   /* definition and creation of SD_CMD_Queue */
   osMessageQDef(SD_CMD_Queue, 5, uint16_t);
   SD_CMD_QueueHandle = osMessageCreate(osMessageQ(SD_CMD_Queue), NULL);
+
+  /* definition and creation of SD_STATUS_Queue */
+  osMessageQDef(SD_STATUS_Queue, 5, uint16_t);
+  SD_STATUS_QueueHandle = osMessageCreate(osMessageQ(SD_STATUS_Queue), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
@@ -436,7 +453,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 	}
 	else
 	{
-		grabandoAudio = false;
+
 		HAL_ADC_Stop_IT(&hadc1);
 	}
 }
@@ -497,7 +514,8 @@ void StartTarjetaSD(void const * argument)
 	uint16_t datoADCAudio = 0;
 	//Valor de ADC que envia por mensaje la rutina de interrupcion
 	bool AlmacenarADCAudio = false;
-
+	bool errorSD = false;
+	bool stop = false;
 	/* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
 	static const char *wav = ".wav";
 	static const char *csv = ".csv";
@@ -515,8 +533,8 @@ void StartTarjetaSD(void const * argument)
 	//UINT br, bw;  //file read/write count
 
 	if (f_mount(&fs, "", 1) != FR_OK) {
-
-		error = true; //Montaje de la tarjta SD fallidoç
+		errorSD = true;
+		osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 		osThreadSuspend(TarjetaSDHandle);
 	} else
 	{
@@ -543,25 +561,29 @@ void StartTarjetaSD(void const * argument)
 
 		switch (comandoMainTask)
 		{
+			case CMD_Stop:
+				stop=true;
+			break;
 				case CMD_GrabarADC_Audio:
 					/*-----------Monto la tarjeta SD--------------------*/
 					if (f_mount(&fs, "", 1) != FR_OK)
 					{
-						error = true; //Montaje de la tarjta SD fallidoç
+						errorSD = true;
+						osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 					}
 					/*-----------Monto la tarjeta SD--------------------*/
 
 					/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
 					memset(nombreArchivo1, 0, strlen(nombreArchivo1));
 					memset(nombreArchivo2, 0, strlen(nombreArchivo2));
-					//strcat(nombreArchivo1,grabacion);
 					sprintf(nombreArchivo1,grabacion,numGrabacionAudio);
 					strcat(nombreArchivo1,csv);
 
 					/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
 					if (f_open(&Archivo1, nombreArchivo1, FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
 					{
-							error=true;
+						errorSD = true;
+						osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 					}else
 					{
 						AlmacenarADCAudio = true;
@@ -578,7 +600,7 @@ void StartTarjetaSD(void const * argument)
 
 		//------------COMANDOS PROVENIENTES DE LA MAIN TASK----------------------------//
 
-		if(AlmacenarADCAudio && !error)
+		if(AlmacenarADCAudio && !errorSD)
 		{
 			if (osMessageWaiting(ADC1_QueueHandle) > 0)
 			{
@@ -587,14 +609,15 @@ void StartTarjetaSD(void const * argument)
 			}
 			else
 			{
-				if (samples_count >= muestras)
+				if (stop)
 				{
-				//cerrar archivo
+				//cerrar archiv
+				stop = false;
 				f_close(&Archivo1);
 				osDelay(100);
 				f_mount(NULL, "", 1); //Desmonto la SD
 				AlmacenarADCAudio = false;
-				ready = true;
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Ready, 0);
 				}
 				osDelay(5);
 			}
@@ -622,6 +645,7 @@ void StartMainTask(void const * argument)
 {
   /* USER CODE BEGIN StartMainTask */
 	Pulsadores teclaPulsada = P_None;
+	EstadoSD estadoSDTask = STAT_Ready;
 	/* Infinite loop */
 	for (;;) {
 
@@ -652,8 +676,31 @@ void StartMainTask(void const * argument)
 				break;
 			}
 
-			/*-----------------PULSADORES PRESIONADOS ---------------------*/
+
 		}
+		/*-----------------PULSADORES PRESIONADOS ---------------------*/
+
+		/*-----------------Comunicacion con la tarea SD ---------------------*/
+		if (osMessageWaiting(SD_STATUS_QueueHandle) > 0) {
+			estadoSDTask = osMessageGet(SD_STATUS_QueueHandle, 0).value.v;
+
+			switch (estadoSDTask) {
+			case STAT_Ready:
+					ready = true;
+				break;
+			case STAT_Error:
+					error = true;
+				break;
+			case STAT_Grbando_Audio:
+
+				break;
+			default:
+				break;
+			}
+
+
+		}
+		/*-----------------PULSADORES PRESIONADOS ---------------------*/
 
 		/*----------------- LOGICA DEL PROGRAMA ---------------------*/
 		if (start && ready) {
@@ -669,6 +716,13 @@ void StartMainTask(void const * argument)
 				grabandoAudio = true;
 				osMessagePut(SD_CMD_QueueHandle, CMD_GrabarADC_Audio, 0);
 			}
+
+		}
+
+		if (grabandoAudio && samples_count >= muestras)
+		{
+			grabandoAudio = false;
+			osMessagePut(SD_CMD_QueueHandle, CMD_Stop, 0);
 
 		}
 
