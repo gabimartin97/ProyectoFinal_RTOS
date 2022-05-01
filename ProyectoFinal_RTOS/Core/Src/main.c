@@ -27,6 +27,8 @@
 #include "string.h"
 #include "stdbool.h"
 #include "stdio.h"
+#include "FIR.h"
+#include "stdlib.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,12 +55,15 @@ osThreadId TarjetaSDHandle;
 osThreadId MainTaskHandle;
 osThreadId ManejoLEDsHandle;
 osThreadId RunningTaskHandle;
+osThreadId FiltroDigitalHandle;
 osMessageQId ADC1_QueueHandle;
 uint8_t ADC1_QueueBuffer[ 500 * sizeof( uint16_t ) ];
 osStaticMessageQDef_t ADC1_QueueControlBlock;
 osMessageQId Pulsadores_QueueHandle;
 osMessageQId SD_CMD_QueueHandle;
 osMessageQId SD_STATUS_QueueHandle;
+osMessageQId LecturaSD_QueueHandle;
+osMessageQId EscrituraSD_QueueHandle;
 /* USER CODE BEGIN PV */
 
 // ---------ESTADOS DEL PROGRAMA----------/
@@ -80,7 +85,7 @@ typedef enum
 	CMD_Nada,					//Ninguno
 	CMD_GrabarADC_ECG,
 	CMD_GrabarADC_Audio,
-	CMD_Filtrdo_Audio,
+	CMD_Filtrado_Audio,
 	CMD_ArchivoWav,
 	CMD_Stop
 
@@ -88,9 +93,9 @@ typedef enum
 
 typedef enum
 {
-	STAT_Ready,					//Ninguno
-	STAT_Grbando_ECG,
-	STAT_Grbando_Audio,
+	STAT_Listo,					//Ninguno
+	STAT_Grabando_ECG,
+	STAT_Grabando_Audio,
 	STAT_Filtrando_Audio,
 	STAT_Creando_WAV,
 	STAT_Error
@@ -116,6 +121,15 @@ static const uint32_t muestras = recordingTime * sampleRate; //Cantidad de muest
 int numGrabacionECG = 0;
 int numGrabacionAudio = 0;
 
+/****************FILTRO*********************/
+	#define FIR_FILTER_LENGHT 16
+	FIRFilter filtroPB;
+	//Coeficientes del filtro
+	static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = {-0.0034586f,-0.0046729f,-0.0046977f,0.0041916f,0.0301665f,0.0745832f,0.1277316f,0.1715579f,0.1885725f,0.1715579f,0.1277316f,0.0745832f,0.0301665f,0.0041916f,-0.0046977f,-0.0046729f};
+	float circularBuffer[FIR_FILTER_LENGHT] = { 0 };
+	uint16_t dato = 0;
+			/****************FILTRO*********************/
+
 // ---------enum PULSADORES ----------/
 
 typedef enum
@@ -140,6 +154,7 @@ void StartTarjetaSD(void const * argument);
 void StartMainTask(void const * argument);
 void StartManejoLEDs(void const * argument);
 void StartRunningTask(void const * argument);
+void StartFiltroDigital(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -214,6 +229,14 @@ int main(void)
   osMessageQDef(SD_STATUS_Queue, 5, uint16_t);
   SD_STATUS_QueueHandle = osMessageCreate(osMessageQ(SD_STATUS_Queue), NULL);
 
+  /* definition and creation of LecturaSD_Queue */
+  osMessageQDef(LecturaSD_Queue, 250, uint16_t);
+  LecturaSD_QueueHandle = osMessageCreate(osMessageQ(LecturaSD_Queue), NULL);
+
+  /* definition and creation of EscrituraSD_Queue */
+  osMessageQDef(EscrituraSD_Queue, 250, uint16_t);
+  EscrituraSD_QueueHandle = osMessageCreate(osMessageQ(EscrituraSD_Queue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -238,6 +261,10 @@ int main(void)
   /* definition and creation of RunningTask */
   osThreadDef(RunningTask, StartRunningTask, osPriorityLow, 0, 128);
   RunningTaskHandle = osThreadCreate(osThread(RunningTask), NULL);
+
+  /* definition and creation of FiltroDigital */
+  osThreadDef(FiltroDigital, StartFiltroDigital, osPriorityAboveNormal, 0, 512);
+  FiltroDigitalHandle = osThreadCreate(osThread(FiltroDigital), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
@@ -509,13 +536,18 @@ void StartLecturaPulsadores(void const * argument)
 void StartTarjetaSD(void const * argument)
 {
   /* USER CODE BEGIN StartTarjetaSD */
-
+	/*-------------CREACION DE VARIABLES DE LA SD TASK -----------------*/
 	ComandosSD comandoMainTask = CMD_Nada;		//Comandos que envia por mensaje la mainTask
 	uint16_t datoADCAudio = 0;
 	//Valor de ADC que envia por mensaje la rutina de interrupcion
+
+	/* ------- ESTADOS DE LA TAREA SD -----*/
 	bool AlmacenarADCAudio = false;
 	bool errorSD = false;
 	bool stop = false;
+	bool filtrarAudio=false;
+	/* ------- ESTADOS DE LA TAREA SD -----*/
+
 	/* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
 	static const char *wav = ".wav";
 	static const char *csv = ".csv";
@@ -527,10 +559,21 @@ void StartTarjetaSD(void const * argument)
 	/* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
 
 	FIL Archivo1;  //Estructura con los datos del archivo 1
+	FIL Archivo2;  //Estructura con los datos del archivo 2
 	FATFS fs; //file system
 	//FIL fil; //file
 	//FRESULT fresult; //to store the result
 	//UINT br, bw;  //file read/write count
+
+	char readBuffer[4] = { 0 };	//buffer para leer 4 char que son los digitos de un dato int
+	char writeBuffer[6] = { 0 }; //buffer para escribir en char un numero int
+	float number = 0.0f;
+	int intNumber = 0;
+	int i = 0;
+	UINT bytesLeidos = 0;
+	BYTE buffer[1]; // array de 1, es decir, un solo caracter
+
+	/*-------------CREACION DE VARIABLES DE LA SD TASK -----------------*/
 
 	if (f_mount(&fs, "", 1) != FR_OK) {
 		errorSD = true;
@@ -540,7 +583,7 @@ void StartTarjetaSD(void const * argument)
 	{
 		f_mount(NULL, "", 1); //Desmonto la SD
 		osDelay(200);
-
+		osMessagePut(SD_STATUS_QueueHandle, STAT_Listo, 0); // esta okey
 
 	}
 	osDelay(100);
@@ -587,10 +630,14 @@ void StartTarjetaSD(void const * argument)
 					}else
 					{
 						AlmacenarADCAudio = true;
+						osMessagePut(SD_STATUS_QueueHandle, STAT_Grabando_Audio, 0);
 						HAL_ADC_Start_IT(&hadc1); //Comienza a trabajar el ADC Audio por interrupcion
 					}
 
+					break;
+				case CMD_Filtrado_Audio:
 
+					filtrarAudio = true;
 
 					break;
 
@@ -602,33 +649,118 @@ void StartTarjetaSD(void const * argument)
 
 		if(AlmacenarADCAudio && !errorSD)
 		{
+			//Espero la lluivia de datos que me va a tirar el ADC.
 			if (osMessageWaiting(ADC1_QueueHandle) > 0)
 			{
 				datoADCAudio = (uint16_t)osMessageGet(ADC1_QueueHandle,0).value.v;
-				f_printf(&Archivo1, "%u,",datoADCAudio);
+				f_printf(&Archivo1, "%u,",datoADCAudio); // Voy grabando los datos en el archivo
 			}
 			else
 			{
-				if (stop)
+				if (stop) //La main task me puede detener por pulsador o porque ya se registraron los datos necesarios
 				{
-				//cerrar archiv
+
 				stop = false;
-				f_close(&Archivo1);
+				f_close(&Archivo1); //cerrar archivo
 				osDelay(100);
-				f_mount(NULL, "", 1); //Desmonto la SD
+
 				AlmacenarADCAudio = false;
-				osMessagePut(SD_STATUS_QueueHandle, STAT_Ready, 0);
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Listo, 0);
 				}
 				osDelay(5);
 			}
 
 
 		}
-		else
+
+
+		if(filtrarAudio && !errorSD)
+		{
+			FIRFilter_Init(&filtroPB, FIR_IMPULSE_RESPONSE, circularBuffer,
+					FIR_FILTER_LENGHT); 		//inicio el filtro
+
+			sprintf(nombreArchivo2,filtrada,numGrabacionAudio);
+			strcat(nombreArchivo2,csv);
+
+			if (f_open(&Archivo2, nombreArchivo2, //Creo el archivo para almacenar muestras filtradas
+					FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
+			{
+				errorSD = true;
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+			}
+
+			osDelay(100);
+
+			if (f_open(&Archivo1, nombreArchivo1, FA_READ) != FR_OK)
+			{	//Abro el archivo de las muestras sin filtro
+				errorSD = true;
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+			} else
+			{
+
+				char readBuffer[4] = { 0 };	//buffer para leer 4 char que son los digitos de un dato int
+				char writeBuffer[6] = { 0 }; //buffer para escribir en char un numero int
+				float number = 0.0f;
+				int intNumber = 0;
+				int i = 0;
+				UINT bytesLeidos = 0;
+				BYTE buffer[1]; // array de 1, es decir, un solo caracter
+
+				/*
+				 * A continuación voy a leer un archivo .csv quiere decir que todos los datos estan escritos como cadena
+				 * de caracteres separados por coma, por ejemplo 1234,5678,1234,3423.... etc
+				 * es por eso que debo leer los 4 caracteres del numero y formar un int con ellos
+				 * si leo una coma ',' quiere decir que ya lei el numero completo y debo pasar al siguiente
+				 * */
+				int contadorDelay =0; // contador para agregar un osDelay y que el sistema no se cuelgue
+				for (;;) { //Bucle que lee de un archivo csv, aplica el filtro y escribe en el otro
+
+
+					f_read(&Archivo1, buffer, sizeof buffer, &bytesLeidos); //Leo  un char
+					if (bytesLeidos == 0)
+						break; /* error or eof */
+
+					switch (buffer[0]) {
+					case ',': //Si el char es una coma quiere decir que ya lei el numero completo
+						i = 0;
+						number = atof(readBuffer); //paso de una cadena de char a un float
+						FIRFilter_Update(&filtroPB, number); // Actualizo el filtro FIR con el float
+						intNumber = (int) filtroPB.out; //El nuevo valor es la salida del filtro FIR
+						if (intNumber < 0) //Por si el filtro devuelve valores negativos
+							intNumber = 0;
+						sprintf(writeBuffer, "%04d,", intNumber); //Escribo una cadena de char a partir de un int
+						f_puts(writeBuffer, &Archivo2);
+						memset(readBuffer, 0, strlen(readBuffer)); //Vacio los buffer
+						memset(writeBuffer, 0, strlen(writeBuffer)); //Vacio los buffer
+						contadorDelay++;
+						break;
+					default: //Si el char no es una coma voy almacenando los digitos del numero en un array
+						readBuffer[i++] = buffer[0];
+						if (i > strlen(readBuffer))
+							i = 0;
+						break;
+						if (contadorDelay % 10 == 0)
+						{
+							osDelay(1);
+						}
+					}
+
+				}
+				f_close(&Archivo1);
+				f_close(&Archivo2);
+				filtrarAudio = false;
+				f_mount(NULL, "", 1); //Desmonto la SD
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Listo, 0);
+
+			}
+
+
+
+		}
+		if(!AlmacenarADCAudio)
 		{
 			osDelay(10);
 		}
-
 
 	}
   /* USER CODE END StartTarjetaSD */
@@ -644,8 +776,13 @@ void StartTarjetaSD(void const * argument)
 void StartMainTask(void const * argument)
 {
   /* USER CODE BEGIN StartMainTask */
+
+	/*-------------CREACION DE VARIABLES DE LA MAIN TASK */
 	Pulsadores teclaPulsada = P_None;
-	EstadoSD estadoSDTask = STAT_Ready;
+	EstadoSD estadoSDTask = STAT_Listo;
+	bool listoSD = false;
+	/*-------------CREACION DE VARIABLES DE LA MAIN TASK */
+
 	/* Infinite loop */
 	for (;;) {
 
@@ -655,11 +792,8 @@ void StartMainTask(void const * argument)
 
 			switch (teclaPulsada) {
 			case P_Start_Stop:
-				if (ready) {
-					start = !start;
-				} else {
-					ready = true;
-				}
+
+				if (!error)	start = !start;
 
 				break;
 			case P_GrabarECG:
@@ -685,13 +819,13 @@ void StartMainTask(void const * argument)
 			estadoSDTask = osMessageGet(SD_STATUS_QueueHandle, 0).value.v;
 
 			switch (estadoSDTask) {
-			case STAT_Ready:
-					ready = true;
+			case STAT_Listo:
+					listoSD = true;
 				break;
 			case STAT_Error:
 					error = true;
 				break;
-			case STAT_Grbando_Audio:
+			case STAT_Grabando_Audio:
 
 				break;
 			default:
@@ -710,7 +844,7 @@ void StartMainTask(void const * argument)
 			if (grabarAudio)
 
 			{
-
+				listoSD = false;
 				numGrabacionAudio++;
 				samples_count = 0;
 				grabandoAudio = true;
@@ -721,8 +855,28 @@ void StartMainTask(void const * argument)
 
 		if (grabandoAudio && samples_count >= muestras)
 		{
-			grabandoAudio = false;
+
+			samples_count = 0;
 			osMessagePut(SD_CMD_QueueHandle, CMD_Stop, 0);
+			osDelay(10);
+			filtrandoAudio = true;
+
+		}
+
+		if(grabandoAudio && listoSD)
+		{
+			grabandoAudio = false;
+			filtrandoAudio = true;
+			listoSD = false;
+			osMessagePut(SD_CMD_QueueHandle, CMD_Filtrado_Audio, 0);
+
+
+		}
+		if(filtrandoAudio && listoSD)
+		{
+			listoSD = false;
+			filtrandoAudio = false;
+			ready = true;
 
 		}
 
@@ -789,6 +943,29 @@ void StartRunningTask(void const * argument)
 		osDelay(250);
 	}
   /* USER CODE END StartRunningTask */
+}
+
+/* USER CODE BEGIN Header_StartFiltroDigital */
+/**
+* @brief Function implementing the FiltroDigital thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartFiltroDigital */
+void StartFiltroDigital(void const * argument)
+{
+  /* USER CODE BEGIN StartFiltroDigital */
+
+  /* Infinite loop */
+  for(;;)
+  {
+
+
+
+
+    osDelay(1);
+  }
+  /* USER CODE END StartFiltroDigital */
 }
 
 /**
