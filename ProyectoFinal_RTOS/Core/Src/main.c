@@ -55,15 +55,12 @@ osThreadId TarjetaSDHandle;
 osThreadId MainTaskHandle;
 osThreadId ManejoLEDsHandle;
 osThreadId RunningTaskHandle;
-osThreadId FiltroDigitalHandle;
 osMessageQId ADC1_QueueHandle;
 uint8_t ADC1_QueueBuffer[ 500 * sizeof( uint16_t ) ];
 osStaticMessageQDef_t ADC1_QueueControlBlock;
 osMessageQId Pulsadores_QueueHandle;
 osMessageQId SD_CMD_QueueHandle;
 osMessageQId SD_STATUS_QueueHandle;
-osMessageQId LecturaSD_QueueHandle;
-osMessageQId EscrituraSD_QueueHandle;
 /* USER CODE BEGIN PV */
 
 // ---------ESTADOS DEL PROGRAMA----------/
@@ -154,7 +151,6 @@ void StartTarjetaSD(void const * argument);
 void StartMainTask(void const * argument);
 void StartManejoLEDs(void const * argument);
 void StartRunningTask(void const * argument);
-void StartFiltroDigital(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -229,14 +225,6 @@ int main(void)
   osMessageQDef(SD_STATUS_Queue, 5, uint16_t);
   SD_STATUS_QueueHandle = osMessageCreate(osMessageQ(SD_STATUS_Queue), NULL);
 
-  /* definition and creation of LecturaSD_Queue */
-  osMessageQDef(LecturaSD_Queue, 250, uint16_t);
-  LecturaSD_QueueHandle = osMessageCreate(osMessageQ(LecturaSD_Queue), NULL);
-
-  /* definition and creation of EscrituraSD_Queue */
-  osMessageQDef(EscrituraSD_Queue, 250, uint16_t);
-  EscrituraSD_QueueHandle = osMessageCreate(osMessageQ(EscrituraSD_Queue), NULL);
-
   /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -261,10 +249,6 @@ int main(void)
   /* definition and creation of RunningTask */
   osThreadDef(RunningTask, StartRunningTask, osPriorityLow, 0, 128);
   RunningTaskHandle = osThreadCreate(osThread(RunningTask), NULL);
-
-  /* definition and creation of FiltroDigital */
-  osThreadDef(FiltroDigital, StartFiltroDigital, osPriorityAboveNormal, 0, 512);
-  FiltroDigitalHandle = osThreadCreate(osThread(FiltroDigital), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
@@ -516,7 +500,7 @@ void StartLecturaPulsadores(void const * argument)
 		}
 		if (HAL_GPIO_ReadPin(SW_3_GPIO_Port, SW_3_Pin) == GPIO_PIN_RESET) {
 			teclaPulsada = P_GrabarAudio;
-			osMessagePut(Pulsadores_QueueHandle, 3, 100);
+			osMessagePut(Pulsadores_QueueHandle, teclaPulsada, 100);
 			osDelay(250);
 		}
 
@@ -561,17 +545,6 @@ void StartTarjetaSD(void const * argument)
 	FIL Archivo1;  //Estructura con los datos del archivo 1
 	FIL Archivo2;  //Estructura con los datos del archivo 2
 	FATFS fs; //file system
-	//FIL fil; //file
-	//FRESULT fresult; //to store the result
-	//UINT br, bw;  //file read/write count
-
-	char readBuffer[4] = { 0 };	//buffer para leer 4 char que son los digitos de un dato int
-	char writeBuffer[6] = { 0 }; //buffer para escribir en char un numero int
-	float number = 0.0f;
-	int intNumber = 0;
-	int i = 0;
-	UINT bytesLeidos = 0;
-	BYTE buffer[1]; // array de 1, es decir, un solo caracter
 
 	/*-------------CREACION DE VARIABLES DE LA SD TASK -----------------*/
 
@@ -617,8 +590,8 @@ void StartTarjetaSD(void const * argument)
 					/*-----------Monto la tarjeta SD--------------------*/
 
 					/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
-					memset(nombreArchivo1, 0, strlen(nombreArchivo1));
-					memset(nombreArchivo2, 0, strlen(nombreArchivo2));
+					memset(nombreArchivo1, 0, sizeof(nombreArchivo1));
+					memset(nombreArchivo2, 0, sizeof(nombreArchivo2));
 					sprintf(nombreArchivo1,grabacion,numGrabacionAudio);
 					strcat(nombreArchivo1,csv);
 
@@ -705,7 +678,7 @@ void StartTarjetaSD(void const * argument)
 				int i = 0;
 				UINT bytesLeidos = 0;
 				BYTE buffer[1]; // array de 1, es decir, un solo caracter
-
+				FRESULT resultado;
 				/*
 				 * A continuación voy a leer un archivo .csv quiere decir que todos los datos estan escritos como cadena
 				 * de caracteres separados por coma, por ejemplo 1234,5678,1234,3423.... etc
@@ -716,7 +689,7 @@ void StartTarjetaSD(void const * argument)
 				for (;;) { //Bucle que lee de un archivo csv, aplica el filtro y escribe en el otro
 
 
-					f_read(&Archivo1, buffer, sizeof buffer, &bytesLeidos); //Leo  un char
+					resultado = f_read(&Archivo1, buffer, sizeof buffer, &bytesLeidos); //Leo  un char
 					if (bytesLeidos == 0)
 						break; /* error or eof */
 
@@ -730,8 +703,8 @@ void StartTarjetaSD(void const * argument)
 							intNumber = 0;
 						sprintf(writeBuffer, "%04d,", intNumber); //Escribo una cadena de char a partir de un int
 						f_puts(writeBuffer, &Archivo2);
-						memset(readBuffer, 0, strlen(readBuffer)); //Vacio los buffer
-						memset(writeBuffer, 0, strlen(writeBuffer)); //Vacio los buffer
+						memset(readBuffer, 0, sizeof(readBuffer)); //Vacio los buffer
+						memset(writeBuffer, 0, sizeof(writeBuffer)); //Vacio los buffer
 						contadorDelay++;
 						break;
 					default: //Si el char no es una coma voy almacenando los digitos del numero en un array
@@ -943,29 +916,6 @@ void StartRunningTask(void const * argument)
 		osDelay(250);
 	}
   /* USER CODE END StartRunningTask */
-}
-
-/* USER CODE BEGIN Header_StartFiltroDigital */
-/**
-* @brief Function implementing the FiltroDigital thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartFiltroDigital */
-void StartFiltroDigital(void const * argument)
-{
-  /* USER CODE BEGIN StartFiltroDigital */
-
-  /* Infinite loop */
-  for(;;)
-  {
-
-
-
-
-    osDelay(1);
-  }
-  /* USER CODE END StartFiltroDigital */
 }
 
 /**
