@@ -450,6 +450,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* ---------------------- RUTINA DE INTERRUPCIÓN ADC AUDIO ---------------------*/
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
@@ -468,7 +469,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 		HAL_ADC_Stop_IT(&hadc1);
 	}
 }
-
+/* ---------------------- RUTINA DE INTERRUPCIÓN ADC AUDIO ---------------------*/
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartLecturaPulsadores */
@@ -712,10 +713,12 @@ void StartTarjetaSD(void const * argument)
 						if (i > strlen(readBuffer))
 							i = 0;
 						break;
-						if (contadorDelay % 10 == 0)
-						{
-							osDelay(1);
-						}
+
+					}
+					if (contadorDelay  >= 20) //Delay cada x datos escritos para que se ejecuten otras tareas
+					{
+						contadorDelay = 0;
+						osDelay(1);
 					}
 
 				}
@@ -799,8 +802,10 @@ void StartMainTask(void const * argument)
 					error = true;
 				break;
 			case STAT_Grabando_Audio:
-
+					grabandoAudio = true;
 				break;
+			case STAT_Filtrando_Audio:
+					filtrandoAudio = true;
 			default:
 				break;
 			}
@@ -820,7 +825,7 @@ void StartMainTask(void const * argument)
 				listoSD = false;
 				numGrabacionAudio++;
 				samples_count = 0;
-				grabandoAudio = true;
+
 				osMessagePut(SD_CMD_QueueHandle, CMD_GrabarADC_Audio, 0);
 			}
 
@@ -838,9 +843,8 @@ void StartMainTask(void const * argument)
 
 		if(grabandoAudio && listoSD)
 		{
-			grabandoAudio = false;
-			filtrandoAudio = true;
 			listoSD = false;
+			grabandoAudio = false;
 			osMessagePut(SD_CMD_QueueHandle, CMD_Filtrado_Audio, 0);
 
 
@@ -914,6 +918,7 @@ void StartRunningTask(void const * argument)
 	for (;;) {
 		HAL_GPIO_TogglePin(LED_Status_GPIO_Port, LED_Status_Pin);
 		osDelay(250);
+
 	}
   /* USER CODE END StartRunningTask */
 }
