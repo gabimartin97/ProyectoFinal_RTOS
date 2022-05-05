@@ -29,6 +29,7 @@
 #include "stdio.h"
 #include "FIR.h"
 #include "stdlib.h"
+#include "make_wav.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -71,6 +72,7 @@ static bool grabarAudio = false;
 
 static bool grabandoAudio = false;
 static bool filtrandoAudio = false;
+static bool creandoWAV= false;
 static bool error = false;
 // ---------ESTADOS DEL PROGRAMA----------/
 
@@ -531,6 +533,7 @@ void StartTarjetaSD(void const * argument)
 	bool errorSD = false;
 	bool stop = false;
 	bool filtrarAudio=false;
+	bool crearWAV=false;
 	/* ------- ESTADOS DE LA TAREA SD -----*/
 
 	/* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
@@ -613,6 +616,9 @@ void StartTarjetaSD(void const * argument)
 
 					filtrarAudio = true;
 
+					break;
+				case CMD_ArchivoWav:
+						crearWAV = true;
 					break;
 
 				default:
@@ -733,6 +739,126 @@ void StartTarjetaSD(void const * argument)
 
 
 		}
+
+		if(crearWAV && !errorSD)
+		{
+			//Creo  un archivo .wav a partir de un archivo csv con esta funcion
+			memset(nombreArchivo2, 0, sizeof(nombreArchivo2));
+			sprintf(nombreArchivo2,filtrada,numGrabacionAudio);
+			strcat(nombreArchivo2,wav);
+
+			memset(nombreArchivo1, 0, sizeof(nombreArchivo1));
+			sprintf(nombreArchivo1,filtrada,numGrabacionAudio);
+			strcat(nombreArchivo1,csv);
+
+			if (f_mount(&fs, "", 1) != FR_OK)
+			{
+					errorSD = true;
+					osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+			}
+
+			if (f_open(&Archivo2, nombreArchivo2, //Creo el archivo para almacenar muestras filtradas
+				FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
+			{
+				errorSD = true;
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+			}
+
+			osDelay(100);
+			if (f_open(&Archivo1, nombreArchivo1, FA_READ) != FR_OK)
+			{	//Abro el archivo de las muestras sin filtro
+				errorSD = true;
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+			} else
+			{
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Creando_WAV, 0);
+
+				uint16_t num_channels;
+				uint16_t bytes_per_sample;
+				uint32_t byte_rate;
+				uint32_t samplesCount =0;
+				UINT bytesWritten;
+				num_channels = 1; /* monoaural */
+				bytes_per_sample = 2; //16 bits
+				byte_rate = sampleRate * num_channels * bytes_per_sample;
+
+
+				/* --------------------- ESCRIBO TODO EL HEADER DEL FORMATO WAV ---------------- */
+				/* write RIFF header */
+
+				//fwrite("RIFF", 1, 4, Archivo2);
+				f_write(&Archivo2, "RIFF", 4, &bytesWritten);
+				write_little_endian(36 + bytes_per_sample * muestras * num_channels, 4,
+						&Archivo2);
+				//fwrite("WAVE", 1, 4, Archivo2);
+				f_write(&Archivo2, "WAVE", 4, &bytesWritten);
+				/* write fmt  subchunk */
+				//fwrite("fmt ", 1, 4, Archivo2);
+				f_write(&Archivo2, "fmt ", 4, &bytesWritten);
+				write_little_endian(16, 4, &Archivo2); /* SubChunk1Size is 16 */
+				write_little_endian(1, 2, &Archivo2); /* PCM is format 1 */
+				write_little_endian(num_channels, 2, &Archivo2);
+				write_little_endian(sampleRate, 4, &Archivo2);
+				write_little_endian(byte_rate, 4, &Archivo2);
+				write_little_endian(num_channels * bytes_per_sample, 2, &Archivo2); /* block align */
+				write_little_endian(8 * bytes_per_sample, 2, &Archivo2); /* bits/sample */
+				/* --------------------- ESCRIBO TODO EL HEADER DEL FORMATO WAV ---------------- 	 */
+				/* write data subchunk */
+				//fwrite("data", 1, 4, Archivo2);
+				f_write(&Archivo2, "data", 4, &bytesWritten);
+				osDelay(100);
+
+				char readBuffer[4] = { 0 };
+				int intNumber = 0;
+				int normalizedNumber;
+				int i = 0;
+				UINT bytesLeidos = 0;
+				BYTE buffer[1]; // array de 1, es decir, un solo caracter
+
+				for (;;) {
+						f_read(&Archivo1, buffer, sizeof buffer,	&bytesLeidos);  //Leo  un char
+						if (bytesLeidos == 0)
+							break; /* error or eof */
+
+						switch (buffer[0]) {
+						case ',': //Si el char es una coma quiere decir que ya lei el numero completo
+							i = 0;
+							intNumber = atoi(readBuffer);
+							//Escalo el valor del adc (0 a 4095) a valores int16_t que van desde -32768 a 32767
+							normalizedNumber = (((65535)/(4095))*intNumber) - 32768;
+
+							//if(normalizedNumber != 0) //Si el wav arranca con datos 0 se chotea
+
+							write_little_endian((int16_t) (normalizedNumber), bytes_per_sample,
+											&Archivo2);
+
+							memset(readBuffer, 0, sizeof(readBuffer));
+							samplesCount++;
+							break;
+						default: //Si el char no es una coma voy almacenando los digitos del numero en un array
+							readBuffer[i++] = buffer[0];
+							if (i > sizeof(readBuffer))
+								i = 0;
+							break;
+
+						}
+						if (samplesCount % 20 == 0) //delay para que se ejecuten otras tareas
+						{
+							osDelay(1);
+						}
+						if (samplesCount >= muestras)break;
+					}
+					f_close(&Archivo1);
+					f_close(&Archivo2);
+
+
+			}
+			crearWAV = false;
+			f_mount(NULL, "", 1); //Desmonto la SD
+			osMessagePut(SD_STATUS_QueueHandle, STAT_Listo, 0);
+
+		}
+
 		if(!AlmacenarADCAudio)
 		{
 			osDelay(10);
@@ -806,6 +932,9 @@ void StartMainTask(void const * argument)
 				break;
 			case STAT_Filtrando_Audio:
 					filtrandoAudio = true;
+			case STAT_Creando_WAV:
+					creandoWAV = true;
+
 			default:
 				break;
 			}
@@ -853,6 +982,16 @@ void StartMainTask(void const * argument)
 		{
 			listoSD = false;
 			filtrandoAudio = false;
+			osMessagePut(SD_CMD_QueueHandle, CMD_ArchivoWav, 0);
+
+
+		}
+
+		if (creandoWAV && listoSD)
+
+		{
+			listoSD = false;
+			creandoWAV = false;
 			ready = true;
 
 		}
