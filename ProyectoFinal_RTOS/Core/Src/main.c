@@ -48,6 +48,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
 
 SPI_HandleTypeDef hspi1;
 
@@ -114,7 +115,7 @@ typedef enum
 uint32_t samples_count = 0; //Contador de muestras
 uint16_t contadorTest = 0;
 static const uint32_t muestras = recordingTime * sampleRate; //Cantidad de muestras totales que se deben adquirir
-
+uint32_t datosDMA_ADC[2];
 
 
 int numGrabacionECG = 0;
@@ -148,6 +149,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_DMA_Init(void);
 void StartLecturaPulsadores(void const * argument);
 void StartTarjetaSD(void const * argument);
 void StartMainTask(void const * argument);
@@ -191,8 +193,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_SPI1_Init();
+
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
 
@@ -306,7 +310,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV4;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
@@ -336,24 +340,32 @@ static void MX_ADC1_Init(void)
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
+  hadc1.Init.ScanConvMode = ENABLE;
   hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 1;
-  hadc1.Init.DMAContinuousRequests = DISABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.NbrOfConversion = 2;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     Error_Handler();
   }
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_1;
+  sConfig.Rank = 2;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -403,6 +415,22 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -430,12 +458,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_Status_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : Pulsador_Pin */
-  GPIO_InitStruct.Pin = Pulsador_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(Pulsador_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pins : SD_CS_Pin LED3_Pin LED2_Pin LED1_Pin */
   GPIO_InitStruct.Pin = SD_CS_Pin|LED3_Pin|LED2_Pin|LED1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -456,19 +478,24 @@ static void MX_GPIO_Init(void)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
 	//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
-	osMessagePut(ADC1_QueueHandle, HAL_ADC_GetValue(&hadc1), 0);
+
+
+	osMessagePut(ADC1_QueueHandle, datosDMA_ADC[0], 0); //debug
 	samples_count++;
 
 	//osMessagePut(ADC1_QueueHandle, contadorTest++, 0);// Prueba para ver si se graban todos los valores
 	/*If continuousconversion mode is DISABLED uncomment below*/
 	if (samples_count < muestras)
 	{
-		HAL_ADC_Start_IT(&hadc1);
+		//HAL_ADC_Start_IT(&hadc1);
+		//HAL_ADC_Start_DMA(&hadc1, datosDMA_ADC, 2);
 	}
 	else
 	{
 
-		HAL_ADC_Stop_IT(&hadc1);
+		//HAL_ADC_Stop_IT(&hadc1);
+
+		HAL_ADC_Stop_DMA(&hadc1);
 	}
 }
 /* ---------------------- RUTINA DE INTERRUPCIÓN ADC AUDIO ---------------------*/
@@ -608,7 +635,8 @@ void StartTarjetaSD(void const * argument)
 					{
 						AlmacenarADCAudio = true;
 						osMessagePut(SD_STATUS_QueueHandle, STAT_Grabando_Audio, 0);
-						HAL_ADC_Start_IT(&hadc1); //Comienza a trabajar el ADC Audio por interrupcion
+						//HAL_ADC_Start_IT(&hadc1); //Comienza a trabajar el ADC Audio por interrupcion
+						HAL_ADC_Start_DMA(&hadc1, datosDMA_ADC, 2);
 					}
 
 					break;
