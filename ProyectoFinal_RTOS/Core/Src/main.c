@@ -64,6 +64,8 @@ osMessageQId Pulsadores_QueueHandle;
 osMessageQId SD_CMD_QueueHandle;
 osMessageQId SD_STATUS_QueueHandle;
 osMessageQId ADC1_Queue2Handle;
+uint8_t ADC1_Queue2Buffer[ 100 * sizeof( uint16_t ) ];
+osStaticMessageQDef_t ADC1_Queue2ControlBlock;
 /* USER CODE BEGIN PV */
 
 // ---------ESTADOS DEL PROGRAMA----------/
@@ -75,15 +77,13 @@ static bool grabarAudio = false;
 static bool grabandoAudio = false;
 static bool grabandoECG = false;
 static bool filtrandoAudio = false;
-static bool creandoWAV= false;
+static bool creandoWAV = false;
 static bool error = false;
 // ---------ESTADOS DEL PROGRAMA----------/
 
 /*----------------------TARJETA SD ------------------------------------------*/
 
-
-typedef enum
-{
+typedef enum {
 	CMD_Nada,					//Ninguno
 	CMD_GrabarADC_ECG,
 	CMD_GrabarADC_Audio,
@@ -91,10 +91,9 @@ typedef enum
 	CMD_ArchivoWav,
 	CMD_Stop
 
-}ComandosSD;
+} ComandosSD;
 
-typedef enum
-{
+typedef enum {
 	STAT_Listo,					//Ninguno
 	STAT_Grabando_ECG,
 	STAT_Grabando_Audio,
@@ -102,7 +101,7 @@ typedef enum
 	STAT_Creando_WAV,
 	STAT_Error
 
-}EstadoSD;
+} EstadoSD;
 /*----------------------TARJETA SD ------------------------------------------*/
 
 /*----------------------ADC------------------------------------------*/
@@ -117,10 +116,10 @@ typedef enum
  */
 // ---------FRECUENCIA DE MUESTREO ----------/
 
-
 uint16_t contadorTest = 0;
 uint32_t contadorIT_ADC = 0; //contador rutina de interrupción ADC
-static const uint32_t samplesAudio_Total = recordingAudioTime * SAMPLE_RATE_AUDIO; //Cantidad de samplesAudio_Total totales que se deben adquirir
+static const uint32_t samplesAudio_Total = recordingAudioTime
+		* SAMPLE_RATE_AUDIO; //Cantidad de samplesAudio_Total totales que se deben adquirir
 static const uint32_t samplesECG_Total = recordingECGTime * SAMPLE_RATE_ECG; //Cantidad de samplesAudio totales que se deben adquirir
 uint32_t samplesAudio_count = 0; //Contador de samplesAudio
 uint32_t samplesECG_count = 0; //Contador de samplesAudio
@@ -129,28 +128,27 @@ bool listoADC_ECG = false;
 
 uint32_t datosDMA_ADC[2];
 
-
-
 int numGrabacionADC = 0;
 
 /****************FILTRO*********************/
-	#define FIR_FILTER_LENGHT 16
-	FIRFilter filtroPB;
-	//Coeficientes del filtro
-	static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = {-0.0034586f,-0.0046729f,-0.0046977f,0.0041916f,0.0301665f,0.0745832f,0.1277316f,0.1715579f,0.1885725f,0.1715579f,0.1277316f,0.0745832f,0.0301665f,0.0041916f,-0.0046977f,-0.0046729f};
-	float circularBuffer[FIR_FILTER_LENGHT] = { 0 };
-	uint16_t dato = 0;
-			/****************FILTRO*********************/
+#define FIR_FILTER_LENGHT 16
+FIRFilter filtroPB;
+//Coeficientes del filtro
+static float FIR_IMPULSE_RESPONSE[FIR_FILTER_LENGHT] = { -0.0034586f,
+		-0.0046729f, -0.0046977f, 0.0041916f, 0.0301665f, 0.0745832f,
+		0.1277316f, 0.1715579f, 0.1885725f, 0.1715579f, 0.1277316f, 0.0745832f,
+		0.0301665f, 0.0041916f, -0.0046977f, -0.0046729f };
+float circularBuffer[FIR_FILTER_LENGHT] = { 0 };
+uint16_t dato = 0;
+/****************FILTRO*********************/
 
 // ---------enum PULSADORES ----------/
-
-typedef enum
-{
+typedef enum {
 	P_None,					//Ninguno
 	P_Start_Stop,
 	P_GrabarECG,
 	P_GrabarAudio
-}Pulsadores;				//Los 3 pulsadores posibles. El 4to es de reset
+} Pulsadores;				//Los 3 pulsadores posibles. El 4to es de reset
 
 // ---------enum PULSADORES ----------/
 
@@ -211,7 +209,15 @@ int main(void)
 
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
-
+ //OJO CON EL BUG ^^^^^
+  //TIENE QUE IR ASI
+  /*
+   MX_GPIO_Init();
+   MX_DMA_Init();
+   MX_ADC1_Init();
+   MX_SPI1_Init();
+   MX_FATFS_Init();
+   */
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -244,7 +250,7 @@ int main(void)
   SD_STATUS_QueueHandle = osMessageCreate(osMessageQ(SD_STATUS_Queue), NULL);
 
   /* definition and creation of ADC1_Queue2 */
-  osMessageQDef(ADC1_Queue2, 100, uint16_t);
+  osMessageQStaticDef(ADC1_Queue2, 100, uint16_t, ADC1_Queue2Buffer, &ADC1_Queue2ControlBlock);
   ADC1_Queue2Handle = osMessageCreate(osMessageQ(ADC1_Queue2), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
@@ -493,19 +499,19 @@ static void MX_GPIO_Init(void)
 /* ---------------------- RUTINA DE INTERRUPCIÓN ADC AUDIO ---------------------*/
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
-	if(grabandoAudio || grabandoECG)contadorIT_ADC++;
+	if (grabandoAudio || grabandoECG)
+		contadorIT_ADC++;
 
-	if(grabandoAudio)
-	{
-	//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
-	osMessagePut(ADC1_QueueHandle, datosDMA_ADC[1], 0);
-	samplesAudio_count++;
+	if (grabandoAudio && !listoADC_Audio) {
+		//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
+		osMessagePut(ADC1_QueueHandle, datosDMA_ADC[1], 0);
+		samplesAudio_count++;
 	}
 
-	if(grabandoECG && (contadorIT_ADC % 4 == 0 )) //Se muestrea el ECG 4 veces mas lento que el audio
-	{
+	if (grabandoECG && (contadorIT_ADC % 4 == 0) && !listoADC_ECG) //Se muestrea el ECG 4 veces mas lento que el audio
+			{
 		osMessagePut(ADC1_Queue2Handle, datosDMA_ADC[0], 0);
-		samplesAudio_count++;
+		samplesECG_count++;
 	}
 	//osMessagePut(ADC1_QueueHandle, contadorTest++, 0);// Prueba para ver si se graban todos los valores
 	/*If continuousconversion mode is DISABLED uncomment below*/
@@ -532,7 +538,7 @@ void StartLecturaPulsadores(void const * argument)
 
 		if (HAL_GPIO_ReadPin(SW_1_GPIO_Port, SW_1_Pin) == GPIO_PIN_RESET) {
 			teclaPulsada = P_Start_Stop;
-			osMessagePut(Pulsadores_QueueHandle,teclaPulsada,100);
+			osMessagePut(Pulsadores_QueueHandle, teclaPulsada, 100);
 			osDelay(250);
 
 		}
@@ -555,16 +561,16 @@ void StartLecturaPulsadores(void const * argument)
 
 /* USER CODE BEGIN Header_StartTarjetaSD */
 /**
-* @brief Function implementing the TarjetaSD thread.
-* @param argument: Not used
-* @retval None
-*/
+ * @brief Function implementing the TarjetaSD thread.
+ * @param argument: Not used
+ * @retval None
+ */
 /* USER CODE END Header_StartTarjetaSD */
 void StartTarjetaSD(void const * argument)
 {
   /* USER CODE BEGIN StartTarjetaSD */
 	/*-------------CREACION DE VARIABLES DE LA SD TASK -----------------*/
-	ComandosSD comandoMainTask = CMD_Nada;		//Comandos que envia por mensaje la mainTask
+	ComandosSD comandoMainTask = CMD_Nada;//Comandos que envia por mensaje la mainTask
 	uint16_t datoADCAudio = 0;
 	uint16_t datoADC_ECG = 0;
 	//Valor de ADC que envia por mensaje la rutina de interrupcion
@@ -574,8 +580,8 @@ void StartTarjetaSD(void const * argument)
 	bool AlmacenarADC_ECG = false;
 	bool errorSD = false;
 	bool stop = false;
-	bool filtrarAudio=false;
-	bool crearWAV=false;
+	bool filtrarAudio = false;
+	bool crearWAV = false;
 	/* ------- ESTADOS DE LA TAREA SD -----*/
 
 	/* PARA ARMAR LOS NOMBRES DE LOS ARCHIVOS*/
@@ -601,8 +607,7 @@ void StartTarjetaSD(void const * argument)
 		errorSD = true;
 		osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 		//osThreadSuspend(TarjetaSDHandle);
-	} else
-	{
+	} else {
 		f_mount(NULL, "", 1); //Desmonto la SD
 		osDelay(200);
 		osMessagePut(SD_STATUS_QueueHandle, STAT_Listo, 0); // esta okey
@@ -613,159 +618,142 @@ void StartTarjetaSD(void const * argument)
 	/* Infinite loop */
 	for (;;) {
 
-
-
 		//------------COMANDOS PROVENIENTES DE LA MAIN TASK----------------------------//
 		if (osMessageWaiting(SD_CMD_QueueHandle) > 0) {
 			comandoMainTask = osMessageGet(SD_CMD_QueueHandle, 0).value.v;
 
-		}else
-		{
-			comandoMainTask = CMD_Nada;
-		}
 
-		switch (comandoMainTask)
-		{
+
+			switch (comandoMainTask) {
 			case CMD_Stop:
-				stop=true;
-			break;
+				stop = true;
+				break;
 			case CMD_GrabarADC_Audio:
 
+				/*-----------Monto la tarjeta SD--------------------*/
+				if (f_mount(&fs, "", 1) != FR_OK) {
+					errorSD = true;
+					osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+				}
+				/*-----------Monto la tarjeta SD--------------------*/
+				/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
+				memset(nombreArchivo1, 0, sizeof(nombreArchivo1));
+				memset(nombreArchivo2, 0, sizeof(nombreArchivo2));
+				sprintf(nombreArchivo1, grabacion, numGrabacionADC);
+				strcat(nombreArchivo1, csv);
+
+				/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
+				if (f_open(&Archivo1, nombreArchivo1,
+						FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
+					errorSD = true;
+					osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+				} else {
+					AlmacenarADCAudio = true;
+					osMessagePut(SD_STATUS_QueueHandle, STAT_Grabando_Audio, 0);
+					HAL_ADC_Start_DMA(&hadc1, datosDMA_ADC, 2);
+				}
+
+				break;
+			case CMD_GrabarADC_ECG:
+
+				/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC DEL ECG--------------------*/
+				memset(nombreArchivoECG, 0, sizeof(nombreArchivoECG));
+				sprintf(nombreArchivoECG, ECG, numGrabacionADC);
+				strcat(nombreArchivoECG, csv);
+				/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC DEL ECG--------------------*/
+
+				if (!AlmacenarADCAudio) {
 					/*-----------Monto la tarjeta SD--------------------*/
-					if (f_mount(&fs, "", 1) != FR_OK)
-					{
+					if (f_mount(&fs, "", 1) != FR_OK) {
 						errorSD = true;
 						osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 					}
 					/*-----------Monto la tarjeta SD--------------------*/
-					/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
-					memset(nombreArchivo1, 0, sizeof(nombreArchivo1));
-					memset(nombreArchivo2, 0, sizeof(nombreArchivo2));
-					sprintf(nombreArchivo1,grabacion,numGrabacionADC);
-					strcat(nombreArchivo1,csv);
+				}
 
-					/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC SIN FILTRAR--------------------*/
-					if (f_open(&Archivo1, nombreArchivo1, FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
-					{
-						errorSD = true;
-						osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
-					}else
-					{
-						AlmacenarADCAudio = true;
-						osMessagePut(SD_STATUS_QueueHandle, STAT_Grabando_Audio, 0);
+				if (f_open(&ArchivoECG, nombreArchivoECG,
+						FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
+					errorSD = true;
+					osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+				} else {
+					if (!AlmacenarADCAudio)
 						HAL_ADC_Start_DMA(&hadc1, datosDMA_ADC, 2);
-					}
+					osMessagePut(SD_STATUS_QueueHandle, STAT_Grabando_ECG, 0);
+					AlmacenarADC_ECG = true;
+				}
 
-					break;
-				case CMD_GrabarADC_ECG:
+				break;
 
-					/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC DEL ECG--------------------*/
-					memset(nombreArchivoECG, 0, sizeof(nombreArchivoECG));
-					sprintf(nombreArchivoECG,ECG,numGrabacionADC);
-					strcat(nombreArchivoECG,csv);
-					/*-----------CREO EL ARCHIVO PARA ALMACENAR LOS DATOS DEL ADC DEL ECG--------------------*/
+			case CMD_Filtrado_Audio:
 
-					if(!AlmacenarADCAudio)
-					{
-						/*-----------Monto la tarjeta SD--------------------*/
-						if (f_mount(&fs, "", 1) != FR_OK)
-						{
-							errorSD = true;
-							osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
-						}
-						/*-----------Monto la tarjeta SD--------------------*/
-					}
+				filtrarAudio = true;
 
-					if (f_open(&ArchivoECG, nombreArchivoECG, FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
-					{
-						errorSD = true;
-						osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
-					}else
-					{
-						if(!AlmacenarADCAudio)HAL_ADC_Start_DMA(&hadc1, datosDMA_ADC, 2);
-												osMessagePut(SD_STATUS_QueueHandle, STAT_Grabando_ECG, 0);
-						AlmacenarADC_ECG = true;
-					}
+				break;
+			case CMD_ArchivoWav:
+				crearWAV = true;
+				break;
 
-					break;
-
-				case CMD_Filtrado_Audio:
-
-					filtrarAudio = true;
-
-					break;
-				case CMD_ArchivoWav:
-						crearWAV = true;
-					break;
-
-				default:
-					break;
+			default:
+				break;
+			}
 		}
 
 		//------------COMANDOS PROVENIENTES DE LA MAIN TASK----------------------------//
 
-		if((AlmacenarADCAudio || AlmacenarADC_ECG) && !errorSD)
-		{
+		if ((AlmacenarADCAudio || AlmacenarADC_ECG) && !errorSD) {
 
 			//Espero la lluivia de datos que me va a tirar el ADC.
-			if (osMessageWaiting(ADC1_QueueHandle) > 0)
+			if (osMessageWaiting(ADC1_QueueHandle) > 0) {
+				datoADCAudio =
+						(uint16_t) osMessageGet(ADC1_QueueHandle, 0).value.v;
+				f_printf(&Archivo1, "%u,", datoADCAudio); // Voy grabando los datos en el archivo
+			}else
+			if (osMessageWaiting(ADC1_Queue2Handle) > 0) {
+				datoADC_ECG =
+						(uint16_t) osMessageGet(ADC1_Queue2Handle, 0).value.v;
+				f_printf(&ArchivoECG, "%u,", datoADC_ECG); // Voy grabando los datos en el archivo
+			}else
 			{
-				datoADCAudio = (uint16_t)osMessageGet(ADC1_QueueHandle,0).value.v;
-				f_printf(&Archivo1, "%u,",datoADCAudio); // Voy grabando los datos en el archivo
-			}
-
-			if (osMessageWaiting(ADC1_Queue2Handle) > 0)
-			{
-				datoADC_ECG = (uint16_t)osMessageGet(ADC1_Queue2Handle,0).value.v;
-				f_printf(&ArchivoECG, "%u,",datoADC_ECG); // Voy grabando los datos en el archivo
-			}
-
-
-
-
 
 			if (stop) //La main task me puede detener por pulsador o porque ya se registraron los datos necesarios
 			{
 
-			stop = false;
-			if(AlmacenarADCAudio)f_close(&Archivo1); //cerrar archivo
-			osDelay(100);
-			if(AlmacenarADC_ECG)f_close(&ArchivoECG); //cerrar archivo
-			osDelay(100);
-			AlmacenarADCAudio = false;
-			AlmacenarADC_ECG = false;
-			osMessagePut(SD_STATUS_QueueHandle, STAT_Listo, 0);
+				stop = false;
+				if (AlmacenarADCAudio)
+					f_close(&Archivo1); //cerrar archivo
+				osDelay(100);
+				if (AlmacenarADC_ECG)
+					f_close(&ArchivoECG); //cerrar archivo
+				osDelay(100);
+				AlmacenarADCAudio = false;
+				AlmacenarADC_ECG = false;
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Listo, 0);
 			}
 			osDelay(5);
-
+			}
 
 		}
 
-
-		if(filtrarAudio && !errorSD)
-		{
+		if (filtrarAudio && !errorSD) {
 			FIRFilter_Init(&filtroPB, FIR_IMPULSE_RESPONSE, circularBuffer,
-					FIR_FILTER_LENGHT); 		//inicio el filtro
+			FIR_FILTER_LENGHT); 		//inicio el filtro
 
-			sprintf(nombreArchivo2,filtrada,numGrabacionADC);
-			strcat(nombreArchivo2,csv);
+			sprintf(nombreArchivo2, filtrada, numGrabacionADC);
+			strcat(nombreArchivo2, csv);
 
 			if (f_open(&Archivo2, nombreArchivo2, //Creo el archivo para almacenar samplesAudio_Total filtradas
-					FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
-			{
+					FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 				errorSD = true;
 				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 			}
 
 			osDelay(100);
 
-			if (f_open(&Archivo1, nombreArchivo1, FA_READ) != FR_OK)
-			{	//Abro el archivo de las samplesAudio_Total sin filtro
+			if (f_open(&Archivo1, nombreArchivo1, FA_READ) != FR_OK) {//Abro el archivo de las samplesAudio_Total sin filtro
 				errorSD = true;
 				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
-			} else
-			{
-
+			} else {
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Filtrando_Audio, 0);
 				char readBuffer[4] = { 0 };	//buffer para leer 4 char que son los digitos de un dato int
 				char writeBuffer[6] = { 0 }; //buffer para escribir en char un numero int
 				float number = 0.0f;
@@ -780,11 +768,11 @@ void StartTarjetaSD(void const * argument)
 				 * es por eso que debo leer los 4 caracteres del numero y formar un int con ellos
 				 * si leo una coma ',' quiere decir que ya lei el numero completo y debo pasar al siguiente
 				 * */
-				int contadorDelay =0; // contador para agregar un osDelay y que el sistema no se cuelgue
+				int contadorDelay = 0; // contador para agregar un osDelay y que el sistema no se cuelgue
 				for (;;) { //Bucle que lee de un archivo csv, aplica el filtro y escribe en el otro
 
-
-					resultado = f_read(&Archivo1, buffer, sizeof buffer, &bytesLeidos); //Leo  un char
+					resultado = f_read(&Archivo1, buffer, sizeof buffer,
+							&bytesLeidos); //Leo  un char
 					if (bytesLeidos == 0)
 						break; /* error or eof */
 
@@ -809,8 +797,8 @@ void StartTarjetaSD(void const * argument)
 						break;
 
 					}
-					if (contadorDelay  >= 20) //Delay cada x datos escritos para que se ejecuten otras tareas
-					{
+					if (contadorDelay >= 20) //Delay cada x datos escritos para que se ejecuten otras tareas
+							{
 						contadorDelay = 0;
 						osDelay(1);
 					}
@@ -824,60 +812,54 @@ void StartTarjetaSD(void const * argument)
 
 			}
 
-
-
 		}
 
-		if(crearWAV && !errorSD)
-		{
+		if (crearWAV && !errorSD) {
 			//Creo  un archivo .wav a partir de un archivo csv con esta funcion
 			memset(nombreArchivo2, 0, sizeof(nombreArchivo2));
-			sprintf(nombreArchivo2,filtrada,numGrabacionADC);
-			strcat(nombreArchivo2,wav);
+			sprintf(nombreArchivo2, filtrada, numGrabacionADC);
+			strcat(nombreArchivo2, wav);
 
 			memset(nombreArchivo1, 0, sizeof(nombreArchivo1));
-			sprintf(nombreArchivo1,filtrada,numGrabacionADC);
-			strcat(nombreArchivo1,csv);
+			sprintf(nombreArchivo1, filtrada, numGrabacionADC);
+			strcat(nombreArchivo1, csv);
 
-			if (f_mount(&fs, "", 1) != FR_OK)
-			{
-					errorSD = true;
-					osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
+			if (f_mount(&fs, "", 1) != FR_OK) {
+				errorSD = true;
+				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 			}
 
 			if (f_open(&Archivo2, nombreArchivo2, //Creo el archivo para almacenar samplesAudio_Total filtradas
-				FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK)
-			{
+					FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
 				errorSD = true;
 				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
 			}
 
 			osDelay(100);
-			if (f_open(&Archivo1, nombreArchivo1, FA_READ) != FR_OK)
-			{	//Abro el archivo de las samplesAudio_Total sin filtro
+			if (f_open(&Archivo1, nombreArchivo1, FA_READ) != FR_OK) {//Abro el archivo de las samplesAudio_Total sin filtro
 				errorSD = true;
 				osMessagePut(SD_STATUS_QueueHandle, STAT_Error, 0); //Envio mensaje de error a la main Task
-			} else
-			{
+			} else {
 				osMessagePut(SD_STATUS_QueueHandle, STAT_Creando_WAV, 0);
 
 				uint16_t num_channels;
 				uint16_t bytes_per_sample;
 				uint32_t byte_rate;
-				uint32_t samplesCount =0;
+				uint32_t samplesCount = 0;
 				UINT bytesWritten;
 				num_channels = 1; /* monoaural */
 				bytes_per_sample = 2; //16 bits
 				byte_rate = SAMPLE_RATE_AUDIO * num_channels * bytes_per_sample;
-
 
 				/* --------------------- ESCRIBO TODO EL HEADER DEL FORMATO WAV ---------------- */
 				/* write RIFF header */
 
 				//fwrite("RIFF", 1, 4, Archivo2);
 				f_write(&Archivo2, "RIFF", 4, &bytesWritten);
-				write_little_endian(36 + bytes_per_sample * samplesAudio_Total * num_channels, 4,
-						&Archivo2);
+				write_little_endian(
+						36
+								+ bytes_per_sample * samplesAudio_Total
+										* num_channels, 4, &Archivo2);
 				//fwrite("WAVE", 1, 4, Archivo2);
 				f_write(&Archivo2, "WAVE", 4, &bytesWritten);
 				/* write fmt  subchunk */
@@ -888,7 +870,8 @@ void StartTarjetaSD(void const * argument)
 				write_little_endian(num_channels, 2, &Archivo2);
 				write_little_endian(SAMPLE_RATE_AUDIO, 4, &Archivo2);
 				write_little_endian(byte_rate, 4, &Archivo2);
-				write_little_endian(num_channels * bytes_per_sample, 2, &Archivo2); /* block align */
+				write_little_endian(num_channels * bytes_per_sample, 2,
+						&Archivo2); /* block align */
 				write_little_endian(8 * bytes_per_sample, 2, &Archivo2); /* bits/sample */
 				/* --------------------- ESCRIBO TODO EL HEADER DEL FORMATO WAV ---------------- 	 */
 				/* write data subchunk */
@@ -904,41 +887,42 @@ void StartTarjetaSD(void const * argument)
 				BYTE buffer[1]; // array de 1, es decir, un solo caracter
 
 				for (;;) {
-						f_read(&Archivo1, buffer, sizeof buffer,	&bytesLeidos);  //Leo  un char
-						if (bytesLeidos == 0)
-							break; /* error or eof */
+					f_read(&Archivo1, buffer, sizeof buffer, &bytesLeidos); //Leo  un char
+					if (bytesLeidos == 0)
+						break; /* error or eof */
 
-						switch (buffer[0]) {
-						case ',': //Si el char es una coma quiere decir que ya lei el numero completo
+					switch (buffer[0]) {
+					case ',': //Si el char es una coma quiere decir que ya lei el numero completo
+						i = 0;
+						intNumber = atoi(readBuffer);
+						//Escalo el valor del adc (0 a 4095) a valores int16_t que van desde -32768 a 32767
+						normalizedNumber = (((65535) / (4095)) * intNumber)
+								- 32768;
+
+						//if(normalizedNumber != 0) //Si el wav arranca con datos 0 se chotea
+
+						write_little_endian((int16_t) (normalizedNumber),
+								bytes_per_sample, &Archivo2);
+
+						memset(readBuffer, 0, sizeof(readBuffer));
+						samplesCount++;
+						break;
+					default: //Si el char no es una coma voy almacenando los digitos del numero en un array
+						readBuffer[i++] = buffer[0];
+						if (i > sizeof(readBuffer))
 							i = 0;
-							intNumber = atoi(readBuffer);
-							//Escalo el valor del adc (0 a 4095) a valores int16_t que van desde -32768 a 32767
-							normalizedNumber = (((65535)/(4095))*intNumber) - 32768;
+						break;
 
-							//if(normalizedNumber != 0) //Si el wav arranca con datos 0 se chotea
-
-							write_little_endian((int16_t) (normalizedNumber), bytes_per_sample,
-											&Archivo2);
-
-							memset(readBuffer, 0, sizeof(readBuffer));
-							samplesCount++;
-							break;
-						default: //Si el char no es una coma voy almacenando los digitos del numero en un array
-							readBuffer[i++] = buffer[0];
-							if (i > sizeof(readBuffer))
-								i = 0;
-							break;
-
-						}
-						if (samplesCount % 20 == 0) //delay para que se ejecuten otras tareas
-						{
-							osDelay(1);
-						}
-						if (samplesCount >= samplesAudio_Total)break;
 					}
-					f_close(&Archivo1);
-					f_close(&Archivo2);
-
+					if (samplesCount % 20 == 0) //delay para que se ejecuten otras tareas
+							{
+						osDelay(1);
+					}
+					if (samplesCount >= samplesAudio_Total)
+						break;
+				}
+				f_close(&Archivo1);
+				f_close(&Archivo2);
 
 			}
 			crearWAV = false;
@@ -947,8 +931,7 @@ void StartTarjetaSD(void const * argument)
 
 		}
 
-		if(!AlmacenarADCAudio)
-		{
+		if (!AlmacenarADCAudio && !AlmacenarADC_ECG) {
 			osDelay(10);
 		}
 
@@ -983,7 +966,8 @@ void StartMainTask(void const * argument)
 			switch (teclaPulsada) {
 			case P_Start_Stop:
 
-				if (!error)	start = !start;
+				if (!error)
+					start = !start;
 
 				break;
 			case P_GrabarECG:
@@ -1000,7 +984,6 @@ void StartMainTask(void const * argument)
 				break;
 			}
 
-
 		}
 		/*-----------------PULSADORES PRESIONADOS ---------------------*/
 
@@ -1010,20 +993,21 @@ void StartMainTask(void const * argument)
 
 			switch (estadoSDTask) {
 			case STAT_Listo:
-					listoSD = true;
+				listoSD = true;
 				break;
 			case STAT_Error:
-					error = true;
+				error = true;
 				break;
 			case STAT_Grabando_Audio:
-					grabandoAudio = true;
+				grabandoAudio = true;
 				break;
 			case STAT_Filtrando_Audio:
-					filtrandoAudio = true;
+				filtrandoAudio = true;
 				break;
 			case STAT_Creando_WAV:
-				break;
 				creandoWAV = true;
+				break;
+
 			case STAT_Grabando_ECG:
 				grabandoECG = true;
 				break;
@@ -1031,7 +1015,6 @@ void StartMainTask(void const * argument)
 			default:
 				break;
 			}
-
 
 		}
 		/*-----------------PULSADORES PRESIONADOS ---------------------*/
@@ -1046,33 +1029,32 @@ void StartMainTask(void const * argument)
 			{
 				listoSD = false;
 				numGrabacionADC++;
-				if(grabarAudio)
-					{
+				if (grabarAudio) {
 					samplesAudio_count = 0;
 					osMessagePut(SD_CMD_QueueHandle, CMD_GrabarADC_Audio, 0);
-					} else listoADC_Audio = true;
-				if(grabarECG)
-				{
-				samplesECG_count = 0;
-				osMessagePut(SD_CMD_QueueHandle, CMD_GrabarADC_ECG, 0);
+				} else
+					listoADC_Audio = true;
+				if (grabarECG) {
+					samplesECG_count = 0;
+					osMessagePut(SD_CMD_QueueHandle, CMD_GrabarADC_ECG, 0);
 
-				} else listoADC_ECG = true;
+				} else
+					listoADC_ECG = true;
 			}
 
 		}
 
-		if(samplesAudio_count >= samplesAudio_Total)
-		{
+		if (samplesAudio_count >= samplesAudio_Total) {
 			listoADC_Audio = true;
+			samplesAudio_count = 0;
 		}
 
-		if(samplesECG_count >= samplesECG_Total)
-		{
+		if (samplesECG_count >= samplesECG_Total) {
 			listoADC_ECG = true;
+			samplesECG_count = 0;
 		}
 
-		if (listoADC_Audio && listoADC_ECG)
-		{
+		if (listoADC_Audio && listoADC_ECG) {
 			HAL_ADC_Stop_DMA(&hadc1);
 			contadorIT_ADC = 0;
 			listoADC_Audio = false;
@@ -1080,30 +1062,29 @@ void StartMainTask(void const * argument)
 			osMessagePut(SD_CMD_QueueHandle, CMD_Stop, 0);
 			osDelay(10);
 
-
 		}
 
-		if(grabandoECG && !grabandoAudio && listoSD)
-		{
-			listoSD = false;
+		if (grabandoECG && listoSD) {
+
 			grabandoECG = false;
-			ready = true;
+			if(!grabandoAudio)
+			{
+
+				listoSD = false;
+				ready = true;
+			}
 		}
 
-		if(grabandoAudio && listoSD)
-		{
+		if (grabandoAudio && listoSD) {
 			listoSD = false;
 			grabandoAudio = false;
 			osMessagePut(SD_CMD_QueueHandle, CMD_Filtrado_Audio, 0);
 
-
 		}
-		if(filtrandoAudio && listoSD)
-		{
+		if (filtrandoAudio && listoSD) {
 			listoSD = false;
 			filtrandoAudio = false;
 			osMessagePut(SD_CMD_QueueHandle, CMD_ArchivoWav, 0);
-
 
 		}
 
@@ -1134,8 +1115,7 @@ void StartManejoLEDs(void const * argument)
 	/* Infinite loop */
 	for (;;) {
 
-		if(!error)
-		{
+		if (!error) {
 			if (ready) // Si no estoy grabando
 			{
 				HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
@@ -1150,12 +1130,9 @@ void StartManejoLEDs(void const * argument)
 				if (grabandoAudio)
 					HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
 			}
-		} else
-		{
+		} else {
 			HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin); // PARPADEA LED 1 CON ERROR
 		}
-
-
 
 		osDelay(500);
 
