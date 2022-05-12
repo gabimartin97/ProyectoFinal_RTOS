@@ -496,15 +496,20 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-/* ---------------------- RUTINA DE INTERRUPCIÓN ADC AUDIO ---------------------*/
+/* ---------------------- RUTINA DE INTERRUPCIÓN ADC ---------------------*/
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
-	if (grabandoAudio || grabandoECG)
-		contadorIT_ADC++;
+	/*
+	 * LOS DATOS DEL ADC SE GRABAN MEDIANTE DMA (DIRECT MEMORY ACESS)
+	 * EL MICRO LO HACE EN SEGUNDO PLANO AUTOMATICAMENTE
+	 * No se porqué al agregar DMA con 2 canales tuve que duplicar la frecuencia del
+	 * APB2clock de 21 a 42 MHz, porque sino me muestreaba a la mitad de velocidad que yo queria
+	 * 5303 samples/s.
+	 * */
 
 	if (grabandoAudio && !listoADC_Audio) {
-		//Coloco el valor del ADC en la cola de mensajes para la tarea que almacena en la SD
-		osMessagePut(ADC1_QueueHandle, datosDMA_ADC[1], 0);
+		//datosDMA_ADC[1] contiene el valor del canal 2 del ADC (Pin A1)
+		osMessagePut(ADC1_QueueHandle, datosDMA_ADC[1], 0); //Lo coloco en la cola de mensajes correspondiente al muestreo del audio
 		samplesAudio_count++;
 	}
 
@@ -513,6 +518,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 		osMessagePut(ADC1_Queue2Handle, datosDMA_ADC[0], 0);
 		samplesECG_count++;
 	}
+	contadorIT_ADC++;
 	//osMessagePut(ADC1_QueueHandle, contadorTest++, 0);// Prueba para ver si se graban todos los valores
 	/*If continuousconversion mode is DISABLED uncomment below*/
 
@@ -723,7 +729,12 @@ void StartTarjetaSD(void const * argument)
 					f_close(&Archivo1); //cerrar archivo
 				osDelay(100);
 				if (AlmacenarADC_ECG)
+				{
+					f_lseek(&ArchivoECG, f_tell(&ArchivoECG) -1 );  //Borro la ultima ','
+					f_putc('\0',&ArchivoECG );						//Borro la ultima ','
+					osDelay(10);
 					f_close(&ArchivoECG); //cerrar archivo
+				}
 				osDelay(100);
 				AlmacenarADCAudio = false;
 				AlmacenarADC_ECG = false;
