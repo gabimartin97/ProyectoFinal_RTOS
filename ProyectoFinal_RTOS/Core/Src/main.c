@@ -1155,7 +1155,7 @@ void StartManejoLEDs(void const * argument)
 			} else //Si estoy grabando
 			{
 				HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET);
-				if (grabarECG)
+				if (grabandoECG)
 					HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
 				if (grabandoAudio)
 					HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
