@@ -52,11 +52,14 @@ DMA_HandleTypeDef hdma_adc1;
 
 SPI_HandleTypeDef hspi1;
 
+UART_HandleTypeDef huart1;
+
 osThreadId LecturaPulsadorHandle;
 osThreadId TarjetaSDHandle;
 osThreadId MainTaskHandle;
 osThreadId ManejoLEDsHandle;
 osThreadId RunningTaskHandle;
+osThreadId TareaBluetoothHandle;
 osMessageQId ADC1_QueueHandle;
 uint8_t ADC1_QueueBuffer[ 500 * sizeof( uint16_t ) ];
 osStaticMessageQDef_t ADC1_QueueControlBlock;
@@ -66,6 +69,9 @@ osMessageQId SD_STATUS_QueueHandle;
 osMessageQId ADC1_Queue2Handle;
 uint8_t ADC1_Queue2Buffer[ 100 * sizeof( uint16_t ) ];
 osStaticMessageQDef_t ADC1_Queue2ControlBlock;
+osMessageQId BT_QueueHandle;
+uint8_t BT_QueueBuffer[ 100 * sizeof( uint16_t ) ];
+osStaticMessageQDef_t BT_QueueControlBlock;
 /* USER CODE BEGIN PV */
 
 // ---------ESTADOS DEL PROGRAMA----------/
@@ -106,8 +112,8 @@ typedef enum {
 /*----------------------TARJETA SD ------------------------------------------*/
 
 /*----------------------ADC------------------------------------------*/
-#define recordingAudioTime 5 // Tiempo de grabacion en segundos
-#define recordingECGTime 5 // Tiempo de grabacion en segundos
+#define recordingAudioTime 10 // Tiempo de grabacion en segundos
+#define recordingECGTime 30 // Tiempo de grabacion en segundos
 // ---------FRECUENCIA DE MUESTREO ----------/
 #define  SAMPLE_RATE_AUDIO 5303
 #define  SAMPLE_RATE_ECG 1303
@@ -153,6 +159,10 @@ typedef enum {
 
 // ---------enum PULSADORES ----------/
 
+// ---------BT ----------/
+bool BT_Listo = true;
+// ---------BT ----------/
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -161,11 +171,13 @@ static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_DMA_Init(void);
+static void MX_USART1_UART_Init(void);
 void StartLecturaPulsadores(void const * argument);
 void StartTarjetaSD(void const * argument);
 void StartMainTask(void const * argument);
 void StartManejoLEDs(void const * argument);
 void StartRunningTask(void const * argument);
+void StartTareaBluetooth(void const * argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -209,6 +221,7 @@ int main(void)
   MX_SPI1_Init();
 
   MX_FATFS_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
  //OJO CON EL BUG ^^^^^
   //TIENE QUE IR ASI
@@ -254,6 +267,10 @@ int main(void)
   osMessageQStaticDef(ADC1_Queue2, 100, uint16_t, ADC1_Queue2Buffer, &ADC1_Queue2ControlBlock);
   ADC1_Queue2Handle = osMessageCreate(osMessageQ(ADC1_Queue2), NULL);
 
+  /* definition and creation of BT_Queue */
+  osMessageQStaticDef(BT_Queue, 100, uint16_t, BT_QueueBuffer, &BT_QueueControlBlock);
+  BT_QueueHandle = osMessageCreate(osMessageQ(BT_Queue), NULL);
+
   /* USER CODE BEGIN RTOS_QUEUES */
 	/* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
@@ -278,6 +295,10 @@ int main(void)
   /* definition and creation of RunningTask */
   osThreadDef(RunningTask, StartRunningTask, osPriorityLow, 0, 128);
   RunningTaskHandle = osThreadCreate(osThread(RunningTask), NULL);
+
+  /* definition and creation of TareaBluetooth */
+  osThreadDef(TareaBluetooth, StartTareaBluetooth, osPriorityIdle, 0, 256);
+  TareaBluetoothHandle = osThreadCreate(osThread(TareaBluetooth), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
 	/* add threads, ... */
@@ -438,6 +459,39 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 9600;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -497,6 +551,10 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+   BT_Listo = true;
+}
 /* ---------------------- RUTINA DE INTERRUPCIÓN ADC ---------------------*/
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 
@@ -517,6 +575,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 	//datosDMA_ADC[0] contiene el valor del canal 1 del ADC (Pin A0)
 	if (grabandoECG && (contadorIT_ADC % 4 == 0) && !listoADC_ECG){
 		osMessagePut(ADC1_Queue2Handle, datosDMA_ADC[0], 0);  //Lo coloco en la cola de mensajes correspondiente al muestreo del ECG
+		osMessagePut(BT_QueueHandle,datosDMA_ADC[0],0);
 		samplesECG_count++;
 	}
 	contadorIT_ADC++;
@@ -988,7 +1047,7 @@ void StartMainTask(void const * argument)
 			switch (teclaPulsada) {
 			case P_Start_Stop:
 
-				if (!error && ready && !stop)
+				if (!error && ready && !stop && (grabarAudio || grabarECG))
 				{
 					start = true;
 				} else
@@ -1187,6 +1246,46 @@ void StartRunningTask(void const * argument)
 
 	}
   /* USER CODE END StartRunningTask */
+}
+
+/* USER CODE BEGIN Header_StartTareaBluetooth */
+/**
+* @brief Function implementing the TareaBluetooth thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartTareaBluetooth */
+void StartTareaBluetooth(void const * argument)
+{
+  /* USER CODE BEGIN StartTareaBluetooth */
+	/*LA APP UTILIZADA SE LLAMA BLUETOOTH ELECTRONICS
+	 *
+	 SE ENVIAN LOS DATOS ENTRE * CON LA LETRA G QUE INDICA LA CURVA CORREPONDIENTE*/
+	uint16_t datoRecibido;
+	char buffer[10];
+
+
+
+  /* Infinite loop */
+  for(;;)
+  {
+	  datoRecibido = (uint16_t)osMessageGet(BT_QueueHandle, osWaitForever).value.v;
+	 if(BT_Listo)
+		 {
+		 	 memset(buffer,0,sizeof(buffer));
+
+			sprintf(buffer, "*G%u*" ,datoRecibido);
+
+			 BT_Listo = false;
+			 HAL_UART_Transmit_IT(&huart1, (uint8_t*)buffer,sizeof(buffer));
+
+
+
+		 }
+
+
+  }
+  /* USER CODE END StartTareaBluetooth */
 }
 
 /**
